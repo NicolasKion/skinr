@@ -1,0 +1,97 @@
+# The whole stack on http://localhost:5200:
+#   docker compose up --build
+# Hot-reloading frontend instead of the built one:
+#   docker compose --profile dev up -d postgres api frontend-dev
+# Postgres alone, for `cargo run` + `npm run dev` on the host:
+#   docker compose up -d postgres
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: shipviewer
+      POSTGRES_PASSWORD: shipviewer
+      POSTGRES_DB: shipviewer
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shipviewer"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    logging: *logging
+
+  # Downloads the latest SDE and seeds it, only when the build changed.
+  sde-import:
+    build: .
+    command: ["sde_import"]
+    environment:
+      DATABASE_URL: postgres://shipviewer:shipviewer@postgres:5432/shipviewer
+      SDE_FORCE: ${SDE_FORCE:-0}
+    volumes:
+      - sde-cache:/app/storage/sde
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgres://shipviewer:shipviewer@postgres:5432/shipviewer
+      BIND_ADDR: 0.0.0.0:3100
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      sde-import:
+        condition: service_completed_successfully
+    logging: *logging
+
+  frontend:
+    build: ./frontend
+    environment:
+      AXUM_URL: http://api:3100
+      ORIGIN: http://localhost:5200
+    depends_on:
+      - api
+    logging: *logging
+
+  proxy:
+    image: caddy:2
+    ports:
+      - "127.0.0.1:5200:5200"
+    volumes:
+      - ./deploy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+      - frontend
+    logging: *logging
+
+  frontend-dev:
+    image: node:22
+    profiles: ["dev"]
+    working_dir: /app
+    command: sh -c "npm ci && npx vite dev --host 0.0.0.0 --port 5200"
+    environment:
+      AXUM_URL: http://api:3100
+      VITE_POLL_WATCH: "1"
+    ports:
+      - "127.0.0.1:5200:5200"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    depends_on:
+      - api
+    logging: *logging
+
+volumes:
+  postgres-data:
+  sde-cache:
+  frontend-node-modules:

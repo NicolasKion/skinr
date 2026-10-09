@@ -1,0 +1,11 @@
+# The composed shared origin on :5200: API and CDN paths go to the API
+# container, everything else to the SvelteKit node server. Keep the prefix
+# list in sync with frontend/proxy-paths.ts.
+
+:5200 {
+	encode zstd gzip
+	@axum path /api/* /cdn/*
+	reverse_proxy @axum api:3100
+
+	reverse_proxy frontend:3000
+}

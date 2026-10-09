@@ -1,0 +1,137 @@
+// The JSON shapes of the Axum API (src/server/api.rs).
+
+export interface Named {
+  id: number;
+  name: string;
+}
+
+export interface MetaGroup extends Named {
+  color: string | null;
+}
+
+/** A livery's swatch colors as #rrggbb, from its SDE material set. */
+export interface Colors {
+  primary: string | null;
+  secondary: string | null;
+  hull: string | null;
+}
+
+/** A faction and its emblem, extracted from the game client by the import. */
+export interface FactionInfo {
+  id: number;
+  name: string;
+  logo_url: string | null;
+}
+
+export interface ShipSummary {
+  id: number;
+  name: string;
+  group_id: number;
+  race_id: number | null;
+  faction_id: number | null;
+  meta_group_id: number | null;
+  tech_level: number | null;
+  dna: string;
+  colors: Colors;
+}
+
+export interface Catalog {
+  sde_build: string | null;
+  races: Named[];
+  factions: FactionInfo[];
+  groups: Named[];
+  meta_groups: MetaGroup[];
+  ships: ShipSummary[];
+}
+
+export interface Skin {
+  id: number;
+  name: string;
+  dna: string;
+  colors: Colors;
+  /** The game's icon for the skin material, when the client has one. */
+  icon_url: string | null;
+}
+
+/**
+ * A run of EVE HTML text with its styles, or a line break (see the Rust
+ * eve_html module). Rendered as text, never as markup.
+ */
+export type RichSegment =
+  | {
+      text: string;
+      bold?: boolean;
+      italic?: boolean;
+      underline?: boolean;
+      /** A validated CSS color, #rrggbbaa. */
+      color?: string;
+      /** A ship this text links to. */
+      type_id?: number;
+    }
+  | { br: true };
+
+export interface ShipDetail {
+  id: number;
+  name: string;
+  /** The description as plain text. */
+  description: string;
+  description_rich: RichSegment[];
+  group: Named;
+  race: Named | null;
+  faction: FactionInfo | null;
+  meta_group: MetaGroup | null;
+  tech_level: number | null;
+  mass: number | null;
+  volume: number | null;
+  capacity: number | null;
+  radius: number | null;
+  dna: string;
+  colors: Colors;
+  skins: Skin[];
+  sheet: Sheet;
+  bonuses: BonusGroup[];
+}
+
+/** A ship's spec sheet (src/sheet.rs): figures as the game's Show Info prints them. */
+export interface Sheet {
+  slots: { high: number; mid: number; low: number; rig: number; turret: number; launcher: number };
+  fitting: {
+    powergrid: number | null;
+    cpu: number | null;
+    calibration: number | null;
+    drone_bay: number | null;
+    drone_bandwidth: number | null;
+    fighter_bay: number | null;
+    fighter_tubes: number | null;
+  };
+  /** Shield, armor, structure; resistances in percent. */
+  defense: {
+    name: string;
+    hp: number;
+    em: number;
+    thermal: number;
+    kinetic: number;
+    explosive: number;
+    recharge?: number;
+  }[];
+  capacitor: { capacity: number | null; recharge: number | null };
+  targeting: {
+    range: number | null;
+    max_targets: number | null;
+    scan_resolution: number | null;
+    signature_radius: number | null;
+    sensor: { kind: string; strength: number } | null;
+  };
+  navigation: {
+    max_velocity: number | null;
+    warp_speed: number | null;
+    align_time: number | null;
+    inertia: number | null;
+  };
+}
+
+export interface BonusGroup {
+  title: string;
+  per_level: boolean;
+  lines: { amount: string | null; text: RichSegment[] }[];
+}

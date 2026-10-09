@@ -1,0 +1,276 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn-svelte/tailwind.css';
+/* Inter with its optical-size axis: tight display cuts at large sizes. */
+@import '@fontsource-variable/inter/opsz.css';
+/* The blueprint's technical type: labels, figures, title blocks. */
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Always dark. Near-black surfaces, white type, and one accent that pages
+   tint per race through --tint (see $lib/eve raceTint). */
+:root {
+  --radius: 1rem;
+  --tint: #a1b5c9;
+  --background: #050506;
+  --foreground: #f5f5f7;
+  --card: #0d0d10;
+  --card-foreground: #f5f5f7;
+  --popover: #141418;
+  --popover-foreground: #f5f5f7;
+  --primary: #f5f5f7;
+  --primary-foreground: #050506;
+  --secondary: oklch(1 0 0 / 8%);
+  --secondary-foreground: #f5f5f7;
+  --muted: oklch(1 0 0 / 6%);
+  --muted-foreground: #86868b;
+  --accent: var(--tint);
+  --accent-foreground: #050506;
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: color-mix(in oklab, var(--tint) 60%, transparent);
+  --destructive: oklch(0.704 0.191 22.216);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-tint: var(--tint);
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) * 1.5);
+  --radius-3xl: calc(var(--radius) * 2);
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  /* Apple's motion: a fast start that settles softly. */
+  --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  /* The blueprint sheet: classic blueprint paper and its line work. */
+  --blueprint-paper: #0b2a4a;
+  --blueprint-ink: #6cc4ff;
+  --blueprint-line: #4d86b8;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply bg-background font-sans text-foreground antialiased;
+    font-optical-sizing: auto;
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background;
+  }
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--tint) 40%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(1 0 0 / 15%) transparent;
+  }
+}
+
+/* Frosted glass: the panels floating over the 3D stage. */
+@utility glass {
+  background: oklch(0.18 0 0 / 55%);
+  backdrop-filter: saturate(180%) blur(24px);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  border: 1px solid oklch(1 0 0 / 9%);
+}
+
+/* The small caps line above a headline. */
+@utility eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Headline type: heavy, tight, slightly negative tracking. */
+@utility display {
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+}
+
+/* White-to-grey sheen on large type. */
+@utility text-sheen {
+  background: linear-gradient(180deg, #ffffff 0%, #ffffff 35%, #8e8e93 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Sheen that picks up the page tint. */
+@utility text-tint-sheen {
+  background: linear-gradient(
+    100deg,
+    #ffffff 10%,
+    color-mix(in oklab, var(--tint) 85%, white) 55%,
+    #ffffff 90%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Hidden scrollbar for horizontal shelves. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Fades in and up as it scrolls into view (scroll-driven, no JS). */
+@utility reveal {
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: reveal-up linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 30%;
+    }
+  }
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(2.5rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* One word of a paragraph that lights up as the reader scrolls past it. */
+@utility reveal-word {
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: word-light linear both;
+      animation-timeline: view();
+      animation-range: cover 10% cover 45%;
+    }
+  }
+}
+
+@keyframes word-light {
+  from {
+    opacity: 0.16;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Page changes cross-fade with a slight lift (the View Transitions API, see
+   +layout.svelte); shared elements such as a ship's name morph between pages. */
+::view-transition-old(root) {
+  animation: 260ms var(--ease-apple) both vt-fade-out;
+}
+::view-transition-new(root) {
+  animation: 420ms var(--ease-apple) both vt-fade-in;
+}
+::view-transition-group(*) {
+  animation-duration: 520ms;
+  animation-timing-function: var(--ease-apple);
+}
+/* The 3D stage animates itself and must stay live through a transition. */
+::view-transition-old(stage) {
+  display: none;
+}
+::view-transition-new(stage) {
+  animation: none;
+}
+::view-transition-group(stage) {
+  animation: none;
+}
+
+/* Explorer and ship page sit side by side: the page shifts over in step with
+   the stage sweeping from its peeking panel to full screen. */
+html[data-nav='forward']::view-transition-old(root) {
+  animation: 700ms var(--ease-apple) both vt-shift-out-left;
+}
+html[data-nav='forward']::view-transition-new(root) {
+  animation: 800ms var(--ease-apple) both vt-shift-in-right;
+}
+html[data-nav='back']::view-transition-old(root) {
+  animation: 600ms var(--ease-apple) both vt-shift-out-right;
+}
+html[data-nav='back']::view-transition-new(root) {
+  animation: 800ms var(--ease-apple) both vt-shift-in-left;
+}
+
+@keyframes vt-shift-out-left {
+  to {
+    opacity: 0;
+    transform: translateX(-28%);
+  }
+}
+@keyframes vt-shift-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(14%);
+  }
+}
+@keyframes vt-shift-out-right {
+  to {
+    opacity: 0;
+    transform: translateX(14%);
+  }
+}
+@keyframes vt-shift-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-28%);
+  }
+}
+
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
