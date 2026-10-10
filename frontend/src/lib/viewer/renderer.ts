@@ -43,6 +43,8 @@ const DEFAULT_SCENE = 'res:/dx9/scene/universe/c01_cube.red';
 /** EVE's textures are BC compressed; the rest only help when present. */
 const REQUIRED_FEATURE = 'texture-compression-bc';
 const OPTIONAL_FEATURES = [
+  // BC compressed volume textures: Triglavian hulls, suns and cloud volumes.
+  'texture-compression-bc-sliced-3d',
   'float32-filterable',
   'depth32float-stencil8',
   'rg11b10ufloat-renderable',
@@ -658,7 +660,7 @@ export class ShipRenderer {
         this.yaw = view.yaw;
         this.pitch = view.pitch;
         this.updateCamera();
-        blue.os.PumpOS();
+        this.pump();
         hologram.apply(1, 0);
         reads.push(hologram.readback());
       }
@@ -666,7 +668,7 @@ export class ShipRenderer {
       this.fov = FIELD_OF_VIEW;
       Object.assign(this, saved);
       this.updateCamera();
-      blue.os.PumpOS();
+      this.pump();
       if (this.hologramAmount > 0) hologram.apply(this.hologramAmount, 0);
     }
 
@@ -890,22 +892,39 @@ export class ShipRenderer {
         this.hologram?.apply(this.hologramAmount, time / 1000, this.glitchAmount);
       }
     } catch (error) {
-      // A frame that threw midway leaves the WebGPU work queue open, and it
-      // then refuses every later frame; close it so the next one starts clean.
-      // oxlint-disable-next-line no-underscore-dangle -- the queue exposes no getter for it
-      if (this.al.GetWorkQueue?.()?._inFrame) {
-        try {
-          this.al.EndScene();
-        } catch {
-          // Nothing more to salvage from this frame.
-        }
+      this.recoverFrame(error);
+    }
+  }
+
+  /** Renders one frame through the runtime; a frame that fails is recovered from. */
+  private pump() {
+    try {
+      blue.os.PumpOS();
+      return true;
+    } catch (error) {
+      this.recoverFrame(error);
+      return false;
+    }
+  }
+
+  /**
+   * A frame that threw midway leaves the WebGPU work queue open, and it then
+   * refuses every later frame: close it so the next one starts clean. One
+   * failed frame must not stop rendering; each distinct failure is reported once.
+   */
+  private recoverFrame(error: unknown) {
+    // oxlint-disable-next-line no-underscore-dangle -- the queue exposes no getter for it
+    if (this.al.GetWorkQueue?.()?._inFrame) {
+      try {
+        this.al.EndScene();
+      } catch {
+        // Nothing more to salvage from this frame.
       }
-      // One failed frame must not stop the loop; report each distinct failure once.
-      const message = String(error);
-      if (!this.reported.has(message)) {
-        this.reported.add(message);
-        console.error(error);
-      }
+    }
+    const message = String(error);
+    if (!this.reported.has(message)) {
+      this.reported.add(message);
+      console.error(error);
     }
   }
 
