@@ -219,7 +219,7 @@
 </script>
 
 <svelte:head>
-  <title>Ship Viewer</title>
+  <title>skinr.space</title>
 </svelte:head>
 
 <svelte:window onkeydown={onKeydown} />

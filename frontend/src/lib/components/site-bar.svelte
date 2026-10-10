@@ -28,8 +28,10 @@
     aria-label="Site"
   >
     <a href="/" class="flex items-center gap-2 text-foreground/90 hover:text-foreground">
-      <Logo class="size-[1.15rem]" />
-      <span class="text-sm font-semibold tracking-tight">Ship Viewer</span>
+      <Logo class="size-[1.35rem]" />
+      <span class="text-sm font-semibold tracking-tight"
+        >skinr<span class="font-normal text-foreground/45">.space</span></span
+      >
     </a>
 
     {#if nav.title}

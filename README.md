@@ -1,4 +1,4 @@
-# Ship Viewer
+# skinr.space
 
 Browse every ship in EVE Online and view it in 3D in the browser, in any of
 its liveries. Ships are built from the game's own data: the Static Data

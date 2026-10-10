@@ -274,7 +274,7 @@
 </script>
 
 <svelte:head>
-  <title>{ship.name} · Ship Viewer</title>
+  <title>{ship.name} · skinr.space</title>
 </svelte:head>
 
 <svelte:window bind:innerWidth onkeydown={onKeydown} />

@@ -1,4 +1,4 @@
-# Ship Viewer
+# skinr.space
 
 Browse and view EVE Online ships in 3D. A Rust API (Axum + Postgres via sqlx)
 serving JSON plus a `/cdn` passthrough to CCP's client CDNs, and a SvelteKit
