@@ -4,6 +4,7 @@
   import FactionEmblem from '$lib/components/faction-emblem.svelte';
   import Logo from '$lib/components/logo.svelte';
   import { raceTint, typeRender } from '$lib/eve';
+  import StageAlert from '$lib/components/stage-alert.svelte';
   import { CENTER, dockTarget, stage } from '$lib/stage.svelte';
   import { HERO_POSE } from '$lib/viewer/poses';
   import type { ShipSummary } from '$lib/types';
@@ -183,8 +184,8 @@
     <p class="eyebrow mb-5 text-muted-foreground">
       {catalog.ships.length} ships · SDE {catalog.sde_build ?? 'unknown'}
     </p>
-    <h1 class="display text-sheen text-[clamp(3rem,8vw,6.5rem)]">
-      Every ship.<br />In three dimensions.
+    <h1 class="display text-[clamp(3rem,8vw,6.5rem)]">
+      <span class="text-sheen">Every ship.<br />In three dimensions.</span>
     </h1>
     <p class="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
       Built live from the EVE Online client and drawn with EVE's own shaders, right in your browser.
@@ -273,7 +274,7 @@
                     style:background="var(--glow)"
                   ></div>
                   <div
-                    class="relative aspect-square overflow-hidden rounded-[1.75rem] bg-white/[0.03] shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1px_rgb(255_255_255/0.04)] transition-transform duration-500 ease-[var(--ease-apple)] group-hover:-translate-y-1.5 {stage
+                    class="relative aspect-square overflow-hidden rounded-[1.75rem] bg-white/[0.03] shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1px_rgb(255_255_255/0.04)] transition-transform duration-500 ease-[var(--ease-apple)] {stage
                       .ship?.id === ship.id
                       ? 'shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1.5px_rgb(255_255_255/0.5)]'
                       : ''}"
@@ -281,7 +282,7 @@
                     <GameImage
                       src={typeRender(ship.id, 256)}
                       alt=""
-                      class="h-full w-full object-cover transition-transform duration-700 ease-[var(--ease-apple)] group-hover:scale-[1.06]"
+                      class="h-full w-full object-cover transition-transform duration-700 ease-[var(--ease-apple)] group-hover:-translate-y-[3%] group-hover:scale-[1.1]"
                     >
                       {#snippet fallback()}
                         <div
@@ -343,6 +344,7 @@
   >
     {#key docked.id}
       <div class="peek-label">
+        <StageAlert name={docked.name} class="pointer-events-auto mb-6" />
         <p class="eyebrow" style:color={dockTint}>
           {groupNames.get(docked.group_id)} · {raceNames.get(docked.race_id ?? -1) ??
             'Unaffiliated'}
@@ -356,7 +358,7 @@
           <LoaderCircle class="size-3.5 animate-spin" />
           {stage.status === 'starting' ? 'Starting the engine' : 'Assembling'}
         {:else if stage.status === 'error'}
-          {stage.error}
+          Could not assemble
         {:else}
           Drag to rotate
         {/if}

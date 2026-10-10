@@ -23,6 +23,9 @@ export interface Engine {
 
 let engine: Promise<Engine> | null = null;
 
+/** Where dev builds put the engine for poking at from the console or a test script. */
+const DEBUG_HANDLE = '__shipEngine';
+
 export function getEngine(onStage?: (stage: EngineStage) => void): Promise<Engine> {
   engine ??= start(onStage).catch((error) => {
     // Let the next viewport try again rather than caching the failure.
@@ -46,22 +49,24 @@ async function start(onStage?: (stage: EngineStage) => void): Promise<Engine> {
 
   onStage?.('ready');
   let latest = 0;
-  let shown: string | null = null;
-  return {
+  /** The DNA last handed to the renderer: on screen, or queued to slide in. */
+  let target: string | null = null;
+  const ready: Engine = {
     build: String(library.build),
     renderer,
     async show(dna: string, transition: ShowTransition = { kind: 'fly' }) {
       const request = ++latest;
-      if (dna === shown) return true;
+      if (dna === target) return true;
       const values = await sof.BuildValuesFromDNAAsync(dna);
       if (request !== latest) return false;
-      if (transition.kind === 'slide') {
-        if (!(await renderer.slideToShip(values, transition.direction))) return false;
-      } else {
-        renderer.setShip(values);
-      }
-      shown = dna;
+      target = dna;
+      if (transition.kind === 'slide') return renderer.slideToShip(values, transition.direction);
+      renderer.setShip(values);
       return true;
     },
   };
+  // For poking at the live scene from the console or a test script while
+  // developing; production builds drop it.
+  if (import.meta.env.DEV) Object.assign(globalThis, { [DEBUG_HANDLE]: ready });
+  return ready;
 }

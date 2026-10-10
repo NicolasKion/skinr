@@ -12,6 +12,7 @@ import {
 } from '@carbonenginejs/runtime/resource';
 import { RegisterObjectResources } from '@carbonenginejs/runtime/resource/object';
 import { CjsWebgpuFormat } from '@carbonenginejs/runtime/resource/formats/webgpu';
+import { CjsPngFormat } from '@carbonenginejs/runtime/resource/formats/png';
 import { SetEffectPathDefaults } from '@carbonenginejs/runtime/utils';
 import { CjsSchema } from '@carbonenginejs/runtime/schema';
 import '@carbonenginejs/runtime/trinity';
@@ -73,6 +74,8 @@ interface CameraState {
 
 /** How quickly the hologram fades in and out, per second. */
 const HOLOGRAM_EASING = 3;
+/** How quickly the missing-resource glitch comes and goes, per second. */
+const GLITCH_EASING = 6;
 
 const MAX_PITCH = 1.5;
 const FIELD_OF_VIEW = Math.PI / 4;
@@ -188,16 +191,37 @@ async function crop(image: ImageData) {
   };
 }
 
+/**
+ * The livery section's view: its camera pose, whether it is on screen, and
+ * where the ship sits in it. The canvas spans the whole viewport; `shift`
+ * moves the ship right by that share of its width (an off-centre lens, so
+ * nothing is cut off at a frame edge) and `scale` sizes it.
+ */
+export interface LiveryView {
+  pose: CameraPose;
+  visible: boolean;
+  shift: number;
+  scale: number;
+}
+
 /** Ease-in-out with a soft landing, for the carousel glide. */
 const glide = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
 
-/** The resource manager reads every res:/ path through the file index. */
-function createSource(library: FileIndexLibrary) {
+/**
+ * The resource manager reads every res:/ path through the file index. A read
+ * that fails (not in the index, or the CDN refused it) is reported to
+ * `onMissing` before the runtime gets the error.
+ */
+function createSource(library: FileIndexLibrary, onMissing: (path: string, error: Error) => void) {
   return {
     // Shaders keep their webgpu path; the bytes behind it are the shipped dx11 effect.
-    Read: (path: string) => readBytes(library, path.replace('/effect.webgpu/', '/effect.dx11/')),
+    Read: (path: string) =>
+      readBytes(library, path.replace('/effect.webgpu/', '/effect.dx11/')).catch((error: Error) => {
+        onMissing(path, error);
+        throw error;
+      }),
   };
 }
 
@@ -262,6 +286,11 @@ export class ShipRenderer {
   private hologramAmount = 0;
   private hologramTarget = 0;
   private hologram: Hologram | null = null;
+  /** 0 is a clean picture, 1 the full missing-resource glitch. */
+  private glitchAmount = 0;
+  private glitchTarget = 0;
+  /** Called for every resource read that fails, with its res:/ path. */
+  onMissing: ((path: string, error: Error) => void) | null = null;
   /**
    * The livery section's own view: a second canvas showing the ship from its
    * own pose with the normal render, drawn by rendering the scene a second
@@ -270,7 +299,7 @@ export class ShipRenderer {
    */
   readonly liveryCanvas = document.createElement('canvas');
   private liveryContext: any = null;
-  private liveryView: { pose: CameraPose; visible: boolean } | null = null;
+  private liveryView: LiveryView | null = null;
   /** The camera's field of view; blueprint captures narrow it for a moment. */
   private fov = FIELD_OF_VIEW;
   /**
@@ -279,6 +308,8 @@ export class ShipRenderer {
    * ship's centre. Eased, so the camera morphs between them.
    */
   private blueprintAmount = 0;
+  /** How far right of centre the camera's lens is shifted, as a share of the canvas width. */
+  private lensShift = 0;
   /** The livery view's own idle spin, for a pose without a yaw. */
   private liveryYaw = 0;
   /** Where the viewer dragged the livery view to; null follows its pose. */
@@ -292,8 +323,19 @@ export class ShipRenderer {
   private drag: { x: number; y: number } | null = null;
   /** The resting radius of the ship on stage, for spacing the carousel. */
   private shipRadius = 50;
-  /** The newest carousel request; older ones give way. */
+  /** Bumped by setShip: a different ship cancels every livery slide. */
   private slideToken = 0;
+  /**
+   * The livery waiting to slide in next. Only one waits: a newer request
+   * replaces it, so skipped liveries never play.
+   */
+  private nextSlide: {
+    values: any;
+    direction: 1 | -1;
+    resolve: (shown: boolean) => void;
+  } | null = null;
+  /** Whether the queue is working through slides. */
+  private sliding = false;
   /** The running glide, if any: the camera target moves from one ship to the next. */
   private slide: {
     from: number[];
@@ -324,7 +366,13 @@ export class ShipRenderer {
   }
 
   private async init(library: FileIndexLibrary) {
-    blue.resMan.Register({ source: createSource(library), useWorkerLoading: false });
+    blue.resMan.Register({
+      source: createSource(library, (path, error) => this.onMissing?.(path, error)),
+      // Formats are opt-in; without PNG, png textures (the film grain noise)
+      // fail as an unrecognized image type.
+      formats: [CjsPngFormat],
+      useWorkerLoading: false,
+    });
     RegisterGeometryResources(blue.resMan);
     RegisterTextureResources(blue.resMan);
     // Composite textures some hulls reference as dynamic:/ paths (the Amarr
@@ -406,6 +454,8 @@ export class ShipRenderer {
   /** Swaps the shown ship for one built from SOF model values. */
   setShip(values: any) {
     this.slideToken++;
+    this.nextSlide?.resolve(false);
+    this.nextSlide = null;
     // A different ship cancels any livery glide in flight.
     if (this.slide) {
       const { resolve } = this.slide;
@@ -435,9 +485,38 @@ export class ShipRenderer {
    * dropped. Resolves false when a newer request overtook this one.
    */
   async slideToShip(values: any, direction: 1 | -1): Promise<boolean> {
-    const token = ++this.slideToken;
-    await this.slideDone;
-    if (token !== this.slideToken) return false;
+    // A livery that has not started gliding yet gives way to this one.
+    this.nextSlide?.resolve(false);
+    const shown = new Promise<boolean>((resolve) => {
+      this.nextSlide = { values, direction, resolve };
+    });
+    void this.runSlides();
+    return shown;
+  }
+
+  /**
+   * Plays queued slides one after another. A glide that has started always
+   * finishes, so rapid clicks never leave the carousel halfway; whatever was
+   * clicked meanwhile plays next (only the latest of it).
+   */
+  private async runSlides() {
+    if (this.sliding) return;
+    this.sliding = true;
+    try {
+      while (this.nextSlide) {
+        const { values, direction, resolve } = this.nextSlide;
+        this.nextSlide = null;
+        // One slide at a time is the point of the queue.
+        // oxlint-disable-next-line no-await-in-loop
+        resolve(await this.slideOnce(values, direction));
+      }
+    } finally {
+      this.sliding = false;
+    }
+  }
+
+  private async slideOnce(values: any, direction: 1 | -1): Promise<boolean> {
+    const token = this.slideToken;
     if (!this.ship) {
       this.setShip(values);
       return true;
@@ -448,23 +527,31 @@ export class ShipRenderer {
     const fromDistance = this.distance;
     const toDistance = Math.max(10, radius * FRAMING_RADII);
 
+    // The camera the viewer watches the carousel through: the livery view
+    // while it shows, else the main one.
+    const livery = this.liveryView?.visible ? this.liveryView : null;
+    const yaw = livery ? this.liveryCamera(livery.pose).yaw : this.yaw;
+    const zoom = livery ? (livery.pose.zoom ?? 1) / livery.scale : 1;
+    const shift = livery?.shift ?? 0;
+
     // Spaced by what the camera can see, not by ship size alone: a big hull
-    // is framed from further back, where the view is wider.
+    // is framed from further back, where the view is wider. With the ship
+    // off centre, the side it sits nearer to has less room than the other.
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
-    const halfWidth = (distance: number) => distance * Math.tan(FIELD_OF_VIEW / 2) * aspect;
+    const reach = (distance: number, side: 1 | -1) =>
+      distance * zoom * Math.tan(FIELD_OF_VIEW / 2) * aspect * (1 - 2 * shift * side);
     const spacing = Math.max(
       (this.shipRadius + radius) * SLIDE_SPACING,
-      halfWidth(fromDistance) + radius * EDGE_MARGIN,
+      reach(fromDistance, direction) + radius * EDGE_MARGIN,
     );
     // Whatever the gap leaves of the outgoing ship inside the final frame, it
     // travels outward during the glide, so it has left the picture before it
     // is removed.
-    const push = Math.max(0, halfWidth(toDistance) + this.shipRadius * EDGE_MARGIN - spacing);
+    const push = Math.max(
+      0,
+      reach(toDistance, direction === 1 ? -1 : 1) + this.shipRadius * EDGE_MARGIN - spacing,
+    );
 
-    // The right-hand side of the camera the viewer watches the carousel
-    // through (the livery view while it shows), flat on the horizon.
-    const livery = this.liveryView?.visible ? this.liveryView.pose : null;
-    const yaw = livery ? this.liveryCamera(livery).yaw : this.yaw;
     const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
     // Where the incoming ship's visual centre goes: beside the point the
     // camera looks at now. Its bounding-sphere centre sits off its origin
@@ -528,11 +615,12 @@ export class ShipRenderer {
       // Polling once per frame is the point here, not a missed parallelism.
       // oxlint-disable-next-line no-await-in-loop
       await nextFrame();
-      if (token !== this.slideToken) return false;
+      // A different ship, or a newer livery while this one still loads.
+      if (token !== this.slideToken || this.nextSlide) return false;
       quiet = blue.resMan.IsLoading() ? 0 : quiet + 1;
       if (quiet >= QUIET_FRAMES) return true;
     }
-    return token === this.slideToken;
+    return token === this.slideToken && !this.nextSlide;
   }
 
   /** Back to the starting angle and idle spin. */
@@ -639,7 +727,7 @@ export class ShipRenderer {
    * above and below; null stops it. Only rendered while `visible`.
    */
   /** Shows the livery view from `pose` while `visible`, or stops it with null. */
-  setLiveryView(view: { pose: CameraPose; visible: boolean } | null) {
+  setLiveryView(view: LiveryView | null) {
     this.liveryView = view;
   }
 
@@ -649,7 +737,8 @@ export class ShipRenderer {
   }
 
   /** Renders the livery view into the main canvas and copies it to its own canvas. */
-  private renderLiveryView(pose: CameraPose) {
+  private renderLiveryView(view: LiveryView, time: number) {
+    const { pose } = view;
     if (!this.hologram || !this.liveryContext) return;
     const { width, height } = this.canvas;
     if (this.liveryCanvas.width !== width || this.liveryCanvas.height !== height) {
@@ -661,13 +750,17 @@ export class ShipRenderer {
       pitch: this.pitch,
       zoom: this.zoom,
       blueprintAmount: this.blueprintAmount,
+      lensShift: this.lensShift,
     };
     try {
       ({ yaw: this.yaw, pitch: this.pitch } = this.liveryCamera(pose));
-      this.zoom = pose.zoom ?? 1;
+      // A smaller ship is the same ship seen from further back.
+      this.zoom = (pose.zoom ?? 1) / view.scale;
+      this.lensShift = view.shift;
       this.blueprintAmount = 0;
       this.updateCamera();
       blue.os.PumpOS();
+      if (this.glitchAmount > 0) this.hologram.apply(0, time / 1000, this.glitchAmount);
       this.hologram.copyTo(this.liveryContext, { x: 0, y: 0, width, height });
     } finally {
       Object.assign(this, saved);
@@ -683,6 +776,11 @@ export class ShipRenderer {
     if (this.pitchTarget !== null) this.pitch = this.pitchTarget;
     this.zoom = this.zoomTarget;
     this.distance = this.restDistance;
+  }
+
+  /** Glitches the picture (1) for a ship with missing resources, or clears it (0). */
+  setGlitch(amount: number) {
+    this.glitchTarget = Math.min(1, Math.max(0, amount));
   }
 
   /** Fades toward the fitting window hologram (1) or the normal render (0). */
@@ -778,12 +876,19 @@ export class ShipRenderer {
     if (Math.abs(this.hologramTarget - this.hologramAmount) < 1e-3) {
       this.hologramAmount = this.hologramTarget;
     }
+    this.glitchAmount +=
+      (this.glitchTarget - this.glitchAmount) * (1 - Math.exp(-seconds * GLITCH_EASING));
+    if (Math.abs(this.glitchTarget - this.glitchAmount) < 1e-3) {
+      this.glitchAmount = this.glitchTarget;
+    }
     try {
       const view = this.liveryView;
-      if (view?.visible && this.ship) this.renderLiveryView(view.pose);
+      if (view?.visible && this.ship) this.renderLiveryView(view, time);
       this.updateCamera();
       blue.os.PumpOS();
-      if (this.hologramAmount > 0) this.hologram?.apply(this.hologramAmount, time / 1000);
+      if (this.hologramAmount > 0 || this.glitchAmount > 0) {
+        this.hologram?.apply(this.hologramAmount, time / 1000, this.glitchAmount);
+      }
     } catch (error) {
       // A frame that threw midway leaves the WebGPU work queue open, and it
       // then refuses every later frame; close it so the next one starts clean.
@@ -905,6 +1010,17 @@ export class ShipRenderer {
     ];
     this.view.SetLookAtPosition(eye, this.target, up);
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
-    this.projection.PerspectiveFov(fov, aspect, Math.max(0.1, distance / 100), distance * 20);
+    const near = Math.max(0.1, distance / 100);
+    const far = distance * 20;
+    if (this.lensShift) {
+      // The same frustum, slid sideways: what the camera looks at lands
+      // `lensShift` of the width right of centre.
+      const top = near * Math.tan(fov / 2);
+      const half = top * aspect;
+      const center = -2 * this.lensShift * half;
+      this.projection.PerspectiveOffCenter(center - half, center + half, -top, top, near, far);
+    } else {
+      this.projection.PerspectiveFov(fov, aspect, near, far);
+    }
   }
 }

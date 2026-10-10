@@ -23,7 +23,8 @@ const SHADER = /* wgsl */ `
 struct Params {
   amount: f32,
   time: f32,
-  _pad: vec2f,
+  glitch: f32,
+  _pad: f32,
 };
 
 @group(0) @binding(0) var frame: texture_2d<f32>;
@@ -45,10 +46,54 @@ fn luma(c: vec4f) -> f32 {
   return dot(c.rgb, vec3f(0.299, 0.587, 0.114));
 }
 
+fn hash(p: vec2f) -> f32 {
+  return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453);
+}
+
+// A broken signal: the frame tears into horizontal slices that jump
+// sideways, the color channels drift apart, scanlines flicker and specks of
+// noise flash up. It runs at a steady level with sudden bursts.
+fn glitched(position: vec2f) -> vec4f {
+  let p = vec2i(position);
+  let k = params.glitch;
+  let tick = floor(params.time * 14.0);
+  let burst = step(0.6, hash(vec2f(floor(params.time * 2.5), 3.0)));
+  let strength = k * (0.35 + 0.65 * burst);
+
+  // Slices of random height, some shifted sideways.
+  let size = mix(4.0, 48.0, hash(vec2f(tick, 1.0)));
+  let band = floor(position.y / size);
+  let roll = hash(vec2f(band, tick));
+  var shift = 0.0;
+  if (roll > 1.0 - 0.4 * strength) {
+    shift = (hash(vec2f(band, tick + 7.0)) - 0.5) * 220.0 * strength;
+  }
+  let split = i32(4.0 * k + 14.0 * strength);
+  let q = p + vec2i(i32(shift), 0);
+  let red = texel(q + vec2i(split, 0));
+  let green = texel(q);
+  let blue = texel(q - vec2i(split, 0));
+  var color = vec4f(red.r, green.g, blue.b, max(max(red.a, green.a), blue.a));
+
+  // Dropouts: whole slices go dark for a frame.
+  if (roll < 0.06 * strength) {
+    color = color * 0.15;
+  }
+  // Scanlines and noise.
+  color = vec4f(color.rgb * (0.82 + 0.18 * sin(position.y * 2.4 + params.time * 60.0)), color.a);
+  if (hash(position + vec2f(tick)) > 1.0 - 0.004 * strength && color.a > 0.0) {
+    color = vec4f(vec3f(0.9), 0.9);
+  }
+  return mix(texel(p), color, min(1.0, k * 1.5));
+}
+
 @fragment
 fn fs(@builtin(position) position: vec4f) -> @location(0) vec4f {
   let p = vec2i(position.xy);
-  let original = texel(p);
+  var original = texel(p);
+  if (params.glitch > 0.0) {
+    original = glitched(position.xy);
+  }
   if (params.amount <= 0.0) {
     return original;
   }
@@ -110,8 +155,11 @@ export class Hologram {
     });
   }
 
-  /** Redraws the frame the runtime just submitted, `amount` of the way to the hologram. */
-  apply(amount: number, time: number) {
+  /**
+   * Redraws the frame the runtime just submitted, `amount` of the way to the
+   * hologram and `glitch` of the way to the broken-signal look.
+   */
+  apply(amount: number, time: number, glitch = 0) {
     const target = this.context.getCurrentTexture();
     const { width, height } = target;
     if (!this.copy || this.copy.width !== width || this.copy.height !== height) {
@@ -130,7 +178,7 @@ export class Hologram {
         ],
       });
     }
-    this.device.queue.writeBuffer(this.uniforms, 0, new Float32Array([amount, time, 0, 0]));
+    this.device.queue.writeBuffer(this.uniforms, 0, new Float32Array([amount, time, glitch, 0]));
 
     const encoder = this.device.createCommandEncoder({ label: 'hologram' });
     encoder.copyTextureToTexture({ texture: target }, { texture: this.copy }, [width, height]);

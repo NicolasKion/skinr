@@ -46,6 +46,10 @@ theme or tooling, do what it does.
   A livery without one is composed from the client's tintable icon layers
   (`/api/skins/layers/{layer}.png`) in CSS, not on a 2D canvas;
   `$lib/components/skin-icon.svelte` does both.
+- A resource read that fails is reported by the renderer (`onMissing`) and
+  collected in `stage.missing`; a broken ship glitches (the same post pass,
+  `setGlitch`) and `$lib/components/stage-alert.svelte` says why. Runtime
+  formats are opt-in: register any new one in `resMan.Register({ formats })`.
 - The fitting window look is our own WebGPU pass (`frontend/src/lib/viewer/hologram.ts`)
   over the finished frame, not a runtime wireframe mode (WebGPU has none).
 - The spec sheet reads only the dogma attributes listed in `src/sheet.rs`
@@ -60,6 +64,10 @@ theme or tooling, do what it does.
 ## Commands
 
 - `docker compose up --build` serves everything on http://localhost:5200.
+- `docker compose watch` keeps it current: it rebuilds and replaces the api
+  or frontend container when their code changes (`develop.watch` in the
+  compose file). The API and the SDE import share one image, so a rebuild
+  after a new migration updates both.
 - `docker compose up -d postgres`, `cargo run`, then `npm run dev -- --port 5200`
   in `frontend/` for development (Postgres on 127.0.0.1:5434, API on 3100).
 - Before committing: `cargo fmt`, `cargo clippy --all-targets` (zero warnings),

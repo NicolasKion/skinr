@@ -4,6 +4,8 @@
 #   docker compose --profile dev up -d postgres api frontend-dev
 # Postgres alone, for `cargo run` + `npm run dev` on the host:
 #   docker compose up -d postgres
+# Rebuild the API and frontend whenever their code changes:
+#   docker compose watch
 
 x-logging: &logging
   driver: json-file
@@ -32,6 +34,9 @@ services:
   # Downloads the latest SDE and seeds it, only when the build changed.
   sde-import:
     build: .
+    # One image with the API, so a rebuild never leaves the importer behind
+    # on an older set of migrations.
+    image: ship-viewer:latest
     command: ["sde_import"]
     environment:
       DATABASE_URL: postgres://shipviewer:shipviewer@postgres:5432/shipviewer
@@ -45,13 +50,24 @@ services:
 
   api:
     build: .
+    image: ship-viewer:latest
     environment:
       DATABASE_URL: postgres://shipviewer:shipviewer@postgres:5432/shipviewer
       BIND_ADDR: 0.0.0.0:3100
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
+      postgres:
+        condition: service_healthy
       sde-import:
         condition: service_completed_successfully
+    # Postgres can take a while to accept connections after a reboot.
+    restart: unless-stopped
+    develop:
+      watch:
+        - { action: rebuild, path: ./src }
+        - { action: rebuild, path: ./migrations }
+        - { action: rebuild, path: ./Cargo.toml }
+        - { action: rebuild, path: ./Cargo.lock }
     logging: *logging
 
   frontend:
@@ -61,6 +77,12 @@ services:
       ORIGIN: http://localhost:5200
     depends_on:
       - api
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: rebuild
+          path: ./frontend
+          ignore: [node_modules/, .svelte-kit/, build/]
     logging: *logging
 
   proxy:
@@ -72,6 +94,7 @@ services:
     depends_on:
       - api
       - frontend
+    restart: unless-stopped
     logging: *logging
 
   frontend-dev:

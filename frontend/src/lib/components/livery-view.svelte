@@ -8,7 +8,19 @@
   import type { CameraPose } from '$lib/viewer/poses';
   import type { ShipRenderer } from '$lib/viewer/renderer';
 
-  let { pose, class: className = '' }: { pose: CameraPose; class?: string } = $props();
+  let {
+    pose,
+    shift = 0,
+    scale = 1,
+    class: className = '',
+  }: {
+    pose: CameraPose;
+    /** How far right of centre the ship sits, as a share of the width. */
+    shift?: number;
+    /** The ship's size relative to filling the view. */
+    scale?: number;
+    class?: string;
+  } = $props();
 
   /** How far outside the viewport the view keeps rendering. */
   const LIVE_MARGIN = '200px';
@@ -49,7 +61,7 @@
   });
 
   $effect(() => {
-    renderer?.setLiveryView({ pose, visible: live });
+    renderer?.setLiveryView({ pose, visible: live, shift, scale });
   });
 </script>
 

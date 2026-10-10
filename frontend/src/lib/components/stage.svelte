@@ -29,6 +29,10 @@
       .then((ready) => {
         if (!alive) return;
         host.append(ready.renderer.canvas);
+        ready.renderer.onMissing = (path, error) => {
+          console.warn(`Missing resource ${path}: ${error.message}`);
+          if (!stage.missing.includes(path)) stage.missing = [...stage.missing, path];
+        };
         stage.resetView = () => ready.renderer.resetView();
         engine = ready;
       })
@@ -57,6 +61,7 @@
     shownShipId = shipId;
     stage.status = 'loading';
     stage.error = null;
+    stage.missing = [];
     current
       .show(dna, transition)
       .then((shown) => {
@@ -217,6 +222,11 @@
 
   $effect(() => {
     engine?.renderer.setHologram(stage.hologram);
+  });
+
+  // A broken ship shows as a broken signal.
+  $effect(() => {
+    engine?.renderer.setGlitch(stage.broken ? 1 : 0);
   });
 
   /**

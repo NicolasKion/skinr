@@ -7,7 +7,10 @@
   import FactionEmblem from '$lib/components/faction-emblem.svelte';
   import GameImage from '$lib/components/game-image.svelte';
   import LiveryView from '$lib/components/livery-view.svelte';
+  import SheetMargin from '$lib/components/sheet-margin.svelte';
+  import ShipRail from '$lib/components/ship-rail.svelte';
   import SkinIcon from '$lib/components/skin-icon.svelte';
+  import StageAlert from '$lib/components/stage-alert.svelte';
   import { firstSentence, raceTint, typeRender } from '$lib/eve';
   import { CENTER, stage, type StagePlacement } from '$lib/stage.svelte';
   import {
@@ -188,10 +191,58 @@
     return pickerWidth / 2 - (selected.offsetLeft + selected.offsetWidth / 2);
   });
 
-  const related = $derived(
-    data.catalog.ships.filter((other) => other.group_id === ship.group.id && other.id !== ship.id),
-  );
   const raceNames = $derived(new Map(data.catalog.races.map((race) => [race.id, race.name])));
+  const groupNames = $derived(new Map(data.catalog.groups.map((group) => [group.id, group.name])));
+  const metaGroups = $derived(new Map(data.catalog.meta_groups.map((meta) => [meta.id, meta])));
+
+  /** The most cards a rail lists. */
+  const RAIL_LIMIT = 24;
+  /** A hull's model family: the first part of its SOF hull name (gc4 for gc4_t2a). */
+  const hullFamily = (shipDna: string) => shipDna.split(':')[0].split('_')[0];
+
+  /**
+   * Related ships, in rails from closest to loosest: the same frame, the same
+   * class, the same builder. A ship appears only in the first rail it fits.
+   */
+  const rails = $derived.by(() => {
+    const listed = new Set([ship.id]);
+    const byTechThenName = (a: ShipSummary, b: ShipSummary) =>
+      (a.tech_level ?? 0) - (b.tech_level ?? 0) || a.name.localeCompare(b.name);
+    const take = (fits: (other: ShipSummary) => boolean) => {
+      const ships = data.catalog.ships
+        .filter((other) => !listed.has(other.id) && fits(other))
+        .sort(byTechThenName)
+        .slice(0, RAIL_LIMIT);
+      for (const other of ships) listed.add(other.id);
+      return ships;
+    };
+    const family = hullFamily(ship.dna);
+    const builder = ship.faction
+      ? {
+          title: `More from ${ship.faction.name}`,
+          note: 'Every class they field',
+          fits: (other: ShipSummary) => other.faction_id === ship.faction?.id,
+        }
+      : {
+          title: `More ${ship.race?.name ?? 'unaffiliated'} ships`,
+          note: 'Every class they field',
+          fits: (other: ShipSummary) => other.race_id === (ship.race?.id ?? null),
+        };
+    return [
+      {
+        title: 'Same frame',
+        note: `Built on the ${ship.name}'s hull, fitted for other roles`,
+        ships: take((other) => hullFamily(other.dna) === family),
+      },
+      {
+        title: `More ${ship.group.name.toLowerCase()}s`,
+        note: 'The same class from other builders',
+        ships: take((other) => other.group_id === ship.group.id),
+        showClass: false,
+      },
+      { title: builder.title, note: builder.note, ships: take(builder.fits) },
+    ].filter((rail) => rail.ships.length);
+  });
 
   const loading = $derived(stage.status === 'starting' || stage.status === 'loading');
 </script>
@@ -233,7 +284,10 @@
       class="blueprint-paper pointer-events-none absolute inset-x-0 z-0"
       style:top="{paper.top}px"
       style:height="{paper.height}px"
-    ></div>
+    >
+      <SheetMargin edge="top" />
+      <SheetMargin edge="bottom" />
+    </div>
   {/if}
   <!-- The hero: everything in it lets pointer events through to the stage
        except its controls. -->
@@ -267,10 +321,10 @@
           {[ship.race?.name, ship.group.name, ship.meta_group?.name].filter(Boolean).join(' · ')}
         </p>
         <h1
-          class="display text-tint-sheen text-[clamp(3.25rem,7.5vw,6.5rem)]"
+          class="display text-[clamp(3.25rem,7.5vw,6.5rem)]"
           style:view-transition-name="ship-name"
         >
-          {ship.name}
+          <span class="text-tint-sheen">{ship.name}</span>
         </h1>
         {#if ship.description}
           <p class="mt-4 text-lg leading-relaxed text-foreground/70">
@@ -316,6 +370,11 @@
       </div>
     </div>
 
+    <!-- A broken ship glitches; this says why. -->
+    <div class="pointer-events-auto absolute top-32 right-6 lg:right-10">
+      <StageAlert name={ship.name} />
+    </div>
+
     <div class="absolute inset-x-0 bottom-5 flex justify-center">
       {#if loading}
         <span class="flex items-center gap-2 text-xs text-muted-foreground">
@@ -323,7 +382,7 @@
           {stage.status === 'starting' ? 'Starting the engine' : `Assembling the ${ship.name}`}
         </span>
       {:else if stage.status === 'error'}
-        <span class="text-xs text-destructive">{stage.error}</span>
+        <!-- The alert above says what went wrong. -->
       {:else}
         <span class="cue flex flex-col items-center text-[0.7rem] text-muted-foreground">
           Scroll <ChevronDown class="size-4" />
@@ -339,8 +398,9 @@
       <section class="chapter" use:chapterOf={'profile'}>
         <div class="chapter-text">
           <p class="reveal eyebrow mb-4" style:color={tint}>Profile</p>
-          <h2 class="reveal display mb-8 text-[clamp(2.25rem,4vw,3.5rem)] text-sheen">
-            {ship.faction?.name ?? ship.race?.name ?? 'Unaffiliated'}
+          <h2 class="reveal display mb-8 text-[clamp(2.25rem,4vw,3.5rem)]">
+            <span class="text-sheen">{ship.faction?.name ?? ship.race?.name ?? 'Unaffiliated'}</span
+            >
             <span class="block text-muted-foreground">{ship.group.name}</span>
           </h2>
           <div class="reveal description text-[1.0625rem] leading-[1.7] text-foreground/75">
@@ -372,26 +432,38 @@
             style:background="radial-gradient(35% 40% at {wide ? 70 : 50}% 50%, color-mix(in oklab, {tint}
             14%, transparent), transparent 70%)"
           ></div>
-          <div
-            class="livery-frame"
-            class:wide
-            style:--shift="{RIGHT.x * 100}vw"
-            style:--scale={RIGHT.scale}
-          >
+          <div class="livery-frame">
             {#if ship.faction?.logo_url}
+              <!-- The emblem sits where the ship does: shifted and scaled like
+                   the stage's RIGHT placement. -->
               <div
-                class="absolute top-1/2 left-1/2 size-[min(120vh,105vw)] -translate-x-1/2 -translate-y-1/2"
+                class="livery-emblem absolute inset-0"
+                class:wide
+                style:--shift="{RIGHT.x * 100}vw"
+                style:--scale={RIGHT.scale}
               >
-                <FactionEmblem url={ship.faction.logo_url} {tint} class="size-full" />
+                <div
+                  class="absolute top-1/2 left-1/2 size-[min(120vh,105vw)] -translate-x-1/2 -translate-y-1/2"
+                >
+                  <FactionEmblem url={ship.faction.logo_url} {tint} class="size-full" />
+                </div>
               </div>
             {/if}
-            <LiveryView pose={FRONT_POSE} class="absolute inset-0" />
+            <!-- The canvas spans the whole width; the renderer shifts the ship
+                 right with an off-centre lens, so a livery sliding out to the
+                 left travels under the text to the screen edge. -->
+            <LiveryView
+              pose={FRONT_POSE}
+              shift={wide ? RIGHT.x : 0}
+              scale={wide ? RIGHT.scale : 1}
+              class="absolute inset-0"
+            />
           </div>
         </div>
         <div class="chapter-text relative">
           <p class="reveal eyebrow mb-4" style:color={tint}>Liveries</p>
-          <h2 class="reveal display mb-4 text-[clamp(2.25rem,4vw,3.5rem)] text-sheen">
-            {liveries.length} ways to wear it.
+          <h2 class="reveal display mb-4 text-[clamp(2.25rem,4vw,3.5rem)]">
+            <span class="text-sheen">{liveries.length} ways to wear it.</span>
           </h2>
           <p class="reveal mb-10 max-w-md text-muted-foreground">
             Every skin on Tranquility that recolors the {ship.name}. Now showing
@@ -425,32 +497,24 @@
       </section>
     {/if}
 
-    {#if related.length}
+    {#if rails.length}
       <section class="mx-auto max-w-[90rem] px-6 pt-[20vh] pb-24" use:chapterOf={'more'}>
-        <h2 class="reveal mb-6 text-2xl font-semibold tracking-tight">
-          More {ship.group.name.toLowerCase()}s
+        <p class="reveal eyebrow mb-4" style:color={tint}>Keep exploring</p>
+        <h2 class="reveal display mb-14 text-[clamp(2.25rem,4vw,3.5rem)]">
+          <span class="text-sheen">Related ships.</span>
         </h2>
-        <div class="-mx-6 flex snap-x gap-4 overflow-x-auto px-6 pb-4 no-scrollbar">
-          {#each related as other (other.id)}
-            <a
-              href="/ships/{other.id}"
-              class="group w-48 shrink-0 snap-start"
-              onclick={() => (stage.morphId = other.id)}
-            >
-              <div
-                class="aspect-square overflow-hidden rounded-[1.75rem] bg-white/[0.03] shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9)] transition-transform duration-500 ease-[var(--ease-apple)] group-hover:-translate-y-1.5"
-              >
-                <GameImage
-                  src={typeRender(other.id, 256)}
-                  alt=""
-                  class="h-full w-full object-cover transition-transform duration-700 ease-[var(--ease-apple)] group-hover:scale-[1.06]"
-                />
-              </div>
-              <p class="mt-3 truncate text-sm font-medium">{other.name}</p>
-              <p class="truncate text-xs text-muted-foreground">
-                {raceNames.get(other.race_id ?? -1) ?? 'Unaffiliated'}
-              </p>
-            </a>
+        <div class="space-y-14">
+          {#each rails as rail (rail.title)}
+            <ShipRail
+              title={rail.title}
+              note={rail.note}
+              ships={rail.ships}
+              {groupNames}
+              {raceNames}
+              {metaGroups}
+              showClass={rail.showClass ?? true}
+              onpick={(other) => (stage.morphId = other.id)}
+            />
           {/each}
         </div>
       </section>
@@ -475,11 +539,36 @@
     height: 100dvh;
     transform: translateY(-50%);
   }
-  .livery-frame.wide {
-    transform: translateY(-50%) translateX(var(--shift)) scale(var(--scale));
+  .livery-emblem.wide {
+    transform: translateX(var(--shift)) scale(var(--scale));
   }
   .blueprint-paper {
     background: var(--blueprint-paper);
+  }
+  /* The paper lights up the dark chapters next to it, like a lit table. */
+  .blueprint-paper::before,
+  .blueprint-paper::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    height: 9rem;
+    pointer-events: none;
+  }
+  .blueprint-paper::before {
+    bottom: 100%;
+    background: linear-gradient(
+      to top,
+      color-mix(in oklab, var(--blueprint-paper) 45%, transparent),
+      transparent
+    );
+  }
+  .blueprint-paper::after {
+    top: 100%;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--blueprint-paper) 45%, transparent),
+      transparent
+    );
   }
   /* The livery carousel: the ends fade so liveries slide in and out of view. */
   .picker {

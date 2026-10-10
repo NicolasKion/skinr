@@ -87,6 +87,15 @@ class Stage {
   status = $state<StageStatus>('idle');
   error = $state<string | null>(null);
   /**
+   * The res:/ paths the ship on stage could not load (not in the client's
+   * file index, or refused by the CDN). Cleared for every new ship or livery.
+   */
+  missing = $state<string[]>([]);
+  /** Whether the ship on stage is broken: it failed to build, or is missing files. */
+  get broken() {
+    return this.status === 'error' || this.missing.length > 0;
+  }
+  /**
    * The ship whose name morphs between pages (a card's label and the hero
    * title). Only one element per page may carry a view-transition-name, so
    * cards name themselves only when they hold this ship.
