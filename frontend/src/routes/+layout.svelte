@@ -1,8 +1,7 @@
 <script lang="ts">
   import './layout.css';
   import { onNavigate } from '$app/navigation';
-  import { page } from '$app/state';
-  import Logo from '$lib/components/logo.svelte';
+  import SiteBar from '$lib/components/site-bar.svelte';
   import Stage from '$lib/components/stage.svelte';
 
   let { children } = $props();
@@ -34,17 +33,11 @@
       transition.finished.finally(() => delete root.dataset.nav);
     });
   });
-
-  let scrollY = $state(0);
-  // Over a ship's hero the bar is clear; once the page scrolls it frosts.
-  const clearBar = $derived(page.url.pathname.startsWith('/ships/') && scrollY < 40);
 </script>
 
 <svelte:head>
   <link rel="icon" href="/favicon.svg" />
 </svelte:head>
-
-<svelte:window bind:scrollY />
 
 <!-- Everything is laid out in one positioned box, so the stage's in-page
      placements (absolute, page coordinates) are measured from the page top
@@ -54,22 +47,7 @@
     <Stage />
   </div>
 
-  <header
-    class="fixed inset-x-0 top-0 z-40 border-b transition-[background-color,border-color] duration-500 {clearBar
-      ? 'border-transparent bg-transparent'
-      : 'border-white/[0.06] bg-background/70 backdrop-blur-xl backdrop-saturate-150'}"
-  >
-    <nav class="mx-auto flex h-12 max-w-[90rem] items-center justify-between px-6">
-      <a href="/" class="flex items-center gap-2 text-foreground/90 hover:text-foreground">
-        <Logo class="size-5" />
-        <span class="text-sm font-semibold tracking-tight">Ship Viewer</span>
-      </a>
-      <div class="flex items-center gap-6 text-xs text-foreground/70">
-        <a href="/" class="hover:text-foreground">Ships</a>
-        <a href="https://github.com/carbonenginejs" class="hover:text-foreground">CarbonEngineJS</a>
-      </div>
-    </nav>
-  </header>
+  <SiteBar />
 
   {@render children()}
 

@@ -37,6 +37,12 @@ theme or tooling, do what it does.
   the renderer draws it into `renderer.liveryCanvas` each frame that section
   is on screen (`setLiveryView`, `$lib/components/livery-view.svelte`).
 - The chapter effect on the ship page alone sets `stage.mode`.
+- The site bar (`$lib/components/site-bar.svelte`) lives in the root layout;
+  pages put their breadcrumb, section links and reset action into
+  `$lib/nav.svelte.ts` while mounted and clear it on the way out.
+- Write `backdrop-filter` without a hand-written `-webkit-` twin: the build's
+  CSS minifier then keeps only the prefixed one, which Chrome ignores. It adds
+  the prefix itself.
 - The blueprint section's paper (`--blueprint-paper`) is a z-0 layer measured
   to the section, not the section's own background: page content sits at z-20,
   above the stage, and would hide the docked ship.

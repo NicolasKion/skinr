@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, ChevronDown, LoaderCircle, RotateCcw } from '@lucide/svelte';
+  import { ChevronDown, LoaderCircle } from '@lucide/svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import Blueprint from '$lib/components/blueprint.svelte';
@@ -12,6 +12,7 @@
   import SkinIcon from '$lib/components/skin-icon.svelte';
   import StageAlert from '$lib/components/stage-alert.svelte';
   import { firstSentence, raceTint, typeRender } from '$lib/eve';
+  import { nav } from '$lib/nav.svelte';
   import { CENTER, stage, type StagePlacement } from '$lib/stage.svelte';
   import {
     BLUEPRINT_POSE,
@@ -245,6 +246,31 @@
   });
 
   const loading = $derived(stage.status === 'starting' || stage.status === 'loading');
+
+  /** Which bar link each chapter lights up; the hero lights none. */
+  const SECTION_OF: Record<Chapter, string | null> = {
+    hero: null,
+    profile: 'profile',
+    blueprint: 'blueprint',
+    liveries: 'liveries',
+    more: 'related',
+  };
+
+  // The site bar names this ship, links its sections and resets its view.
+  $effect(() => {
+    nav.title = ship.name;
+    nav.sections = [
+      ...(ship.description ? [{ id: 'profile', label: 'Profile' }] : []),
+      { id: 'blueprint', label: 'Blueprint' },
+      ...(ship.skins.length ? [{ id: 'liveries', label: 'Liveries' }] : []),
+      ...(rails.length ? [{ id: 'related', label: 'Related' }] : []),
+    ];
+    nav.reset = () => stage.resetView?.();
+  });
+  $effect(() => {
+    nav.active = SECTION_OF[chapter];
+  });
+  $effect(() => () => nav.clear());
 </script>
 
 <svelte:head>
@@ -296,23 +322,6 @@
     style:--tint={tint}
     use:chapterOf={'hero'}
   >
-    <div class="mx-auto flex w-full max-w-[90rem] items-center justify-between px-6 pt-16">
-      <a
-        href="/"
-        class="glass pointer-events-auto flex items-center gap-1.5 rounded-full py-2 pr-4 pl-3 text-sm text-foreground/85 hover:text-foreground"
-      >
-        <ArrowLeft class="size-4" /> All ships
-      </a>
-      <button
-        type="button"
-        class="glass pointer-events-auto grid size-10 place-items-center rounded-full text-foreground/75 hover:text-foreground"
-        title="Reset view"
-        onclick={() => stage.resetView?.()}
-      >
-        <RotateCcw class="size-4" />
-      </button>
-    </div>
-
     <div
       class="mx-auto mt-auto flex w-full max-w-[90rem] flex-wrap items-end justify-between gap-8 px-6 pb-16"
     >
@@ -395,7 +404,7 @@
        half of the screen, the stage moves to the other. -->
   <div class="relative z-20" style:--tint={tint}>
     {#if ship.description}
-      <section class="chapter" use:chapterOf={'profile'}>
+      <section id="profile" class="chapter" use:chapterOf={'profile'}>
         <div class="chapter-text">
           <p class="reveal eyebrow mb-4" style:color={tint}>Profile</p>
           <h2 class="reveal display mb-8 text-[clamp(2.25rem,4vw,3.5rem)]">
@@ -412,7 +421,12 @@
 
     <!-- The blueprint is a sheet of its own: solid blueprint paper from edge to
          edge, set hard against the dark chapters around it. -->
-    <section class="min-h-dvh px-4 py-24 lg:px-10" use:chapterOf={'blueprint'} use:paperOf>
+    <section
+      id="blueprint"
+      class="min-h-dvh px-4 py-24 lg:px-10"
+      use:chapterOf={'blueprint'}
+      use:paperOf
+    >
       <div class="mx-auto max-w-[90rem]">
         <p class="reveal eyebrow mb-4 text-[var(--blueprint-ink)]">Blueprint</p>
         <h2 class="reveal display mb-10 text-[clamp(2.25rem,4vw,3.5rem)] text-white">
@@ -423,7 +437,7 @@
     </section>
 
     {#if ship.skins.length}
-      <section class="chapter relative" use:chapterOf={'liveries'}>
+      <section id="liveries" class="chapter relative" use:chapterOf={'liveries'}>
         <!-- The section's own ship, at half its height beside the text, over
              the faction emblem. Full-bleed and scrolling with the section. -->
         <div class="livery-stage pointer-events-none absolute inset-y-0" aria-hidden="true">
@@ -498,7 +512,11 @@
     {/if}
 
     {#if rails.length}
-      <section class="mx-auto max-w-[90rem] px-6 pt-[20vh] pb-24" use:chapterOf={'more'}>
+      <section
+        id="related"
+        class="mx-auto max-w-[90rem] px-6 pt-[20vh] pb-24"
+        use:chapterOf={'more'}
+      >
         <p class="reveal eyebrow mb-4" style:color={tint}>Keep exploring</p>
         <h2 class="reveal display mb-14 text-[clamp(2.25rem,4vw,3.5rem)]">
           <span class="text-sheen">Related ships.</span>

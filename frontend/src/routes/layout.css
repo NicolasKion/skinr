@@ -101,7 +101,6 @@
 @utility glass {
   background: oklch(0.18 0 0 / 55%);
   backdrop-filter: saturate(180%) blur(24px);
-  -webkit-backdrop-filter: saturate(180%) blur(24px);
   border: 1px solid oklch(1 0 0 / 9%);
 }
 

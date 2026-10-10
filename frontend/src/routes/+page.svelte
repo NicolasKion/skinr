@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { ArrowRight, LoaderCircle, Search, X } from '@lucide/svelte';
+  import { untrack } from 'svelte';
+  import { ArrowRight, LoaderCircle } from '@lucide/svelte';
   import GameImage from '$lib/components/game-image.svelte';
   import FactionEmblem from '$lib/components/faction-emblem.svelte';
   import Logo from '$lib/components/logo.svelte';
   import { raceTint, typeRender } from '$lib/eve';
+  import ShipFilters from '$lib/components/ship-filters.svelte';
   import StageAlert from '$lib/components/stage-alert.svelte';
+  import { nav } from '$lib/nav.svelte';
   import { CENTER, dockTarget, stage } from '$lib/stage.svelte';
   import { HERO_POSE } from '$lib/viewer/poses';
   import type { ShipSummary } from '$lib/types';
@@ -80,7 +83,6 @@
 
   let race = $state<number | null>(null);
   let query = $state('');
-  let searchInput = $state<HTMLInputElement>();
 
   const groupNames = $derived(new Map(catalog.groups.map((group) => [group.id, group.name])));
   const raceNames = $derived(new Map(catalog.races.map((entry) => [entry.id, entry.name])));
@@ -141,16 +143,62 @@
     stage.morphId = ship.id;
   }
 
-  // The segmented control's pill slides under the active race.
+  // The race filter's tabs: all, then each race in the catalog.
   const raceTabs = $derived<{ id: number | null; name: string }[]>([
     { id: null, name: 'All' },
     ...catalog.races,
   ]);
-  let tabButtons = $state<Record<string, HTMLButtonElement>>({});
-  let pill = $state({ left: 0, width: 0 });
+
+  /** Where the site bar ends, in px from the top: its inset, its height and a gap. */
+  const BAR_BOTTOM = 72;
+
+  let filterRow = $state<HTMLElement>();
+  let results = $state<HTMLElement>();
+  /** Room left between the bar and the first result after filtering from the bar, in px. */
+  const RESULTS_GAP = 8;
+  let pageFilters = $state<ShipFilters>();
+  let dockedFilters = $state<ShipFilters>();
+  /** Whether the filter row has scrolled up under the site bar. */
+  let scrolledPast = $state(false);
+  /** Typing in the bar can shrink the list and scroll the row back; stay docked meanwhile. */
+  let barSearchFocused = $state(false);
+  const filtersDocked = $derived(scrolledPast || barSearchFocused);
+
   $effect(() => {
-    const button = tabButtons[String(race)];
-    if (button) pill = { left: button.offsetLeft, width: button.offsetWidth };
+    if (!filterRow) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        scrolledPast = !entry.isIntersecting && entry.boundingClientRect.top < BAR_BOTTOM;
+      },
+      { rootMargin: `-${BAR_BOTTOM}px 0px 0px 0px` },
+    );
+    observer.observe(filterRow);
+    return () => observer.disconnect();
+  });
+
+  $effect(() => {
+    nav.center = barFilters;
+    return () => nav.clear();
+  });
+  $effect(() => {
+    nav.centerShown = filtersDocked;
+  });
+
+  // Filtering from the bar brings the results back to their start, right
+  // under it, so the list in view is the list the filter made.
+  let filterSeen = false;
+  $effect(() => {
+    void race;
+    void query;
+    if (!filterSeen) {
+      filterSeen = true;
+      return;
+    }
+    untrack(() => {
+      if (!filtersDocked || !results) return;
+      const top = results.getBoundingClientRect().top + window.scrollY - BAR_BOTTOM - RESULTS_GAP;
+      if (window.scrollY > top) window.scrollTo({ top });
+    });
   });
 
   const docked = $derived(stage.ship);
@@ -163,9 +211,9 @@
   );
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.key === '/' && document.activeElement !== searchInput) {
+    if (event.key === '/' && !(document.activeElement instanceof HTMLInputElement)) {
       event.preventDefault();
-      searchInput?.focus();
+      (filtersDocked ? dockedFilters : pageFilters)?.focusSearch();
     }
   }
 </script>
@@ -179,6 +227,18 @@
 <!-- Two sections side by side: the browser on the left, and the 3D stage as
      the next page peeking in from the right edge. Opening a ship shifts over
      to it (see the directional view transition in +layout.svelte). -->
+<!-- The filters as the site bar shows them once docked. -->
+{#snippet barFilters()}
+  <ShipFilters
+    races={raceTabs}
+    bind:race
+    bind:query
+    compact
+    bind:this={dockedFilters}
+    onfocuschange={(focused) => (barSearchFocused = focused)}
+  />
+{/snippet}
+
 <main class="explorer px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10">
   <section class="mb-14 max-w-4xl">
     <p class="eyebrow mb-5 text-muted-foreground">
@@ -193,62 +253,20 @@
     </p>
   </section>
 
-  <div class="sticky top-12 z-30 -mx-6 mb-10 px-6 py-3">
-    <div
-      class="absolute inset-0 bg-gradient-to-b from-background via-background/90 to-transparent"
-    ></div>
-    <div class="relative flex flex-wrap items-center gap-3 lg:flex-nowrap">
-      <div class="glass relative flex min-w-0 overflow-x-auto rounded-full p-1 no-scrollbar">
-        <span
-          class="absolute top-1 bottom-1 rounded-full bg-white/[0.12] shadow-[inset_0_1px_0_rgb(255_255_255/0.08)] transition-all duration-500 ease-[var(--ease-apple)]"
-          style:left="{pill.left}px"
-          style:width="{pill.width}px"
-        ></span>
-        {#each raceTabs as tab (tab.id ?? 'all')}
-          <button
-            type="button"
-            bind:this={tabButtons[String(tab.id)]}
-            class="relative rounded-full px-4 py-1.5 text-sm whitespace-nowrap transition-colors {race ===
-            tab.id
-              ? 'text-foreground'
-              : 'text-foreground/55 hover:text-foreground/85'}"
-            onclick={() => (race = tab.id)}
-          >
-            {tab.name}
-          </button>
-        {/each}
-      </div>
-
-      <label
-        class="glass relative ml-auto flex h-10 w-full shrink-0 items-center rounded-full sm:w-64"
-      >
-        <Search class="ml-3.5 size-4 shrink-0 text-muted-foreground" />
-        <input
-          bind:this={searchInput}
-          bind:value={query}
-          placeholder="Search ships or classes"
-          class="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm outline-none placeholder:text-muted-foreground"
-        />
-        {#if query}
-          <button
-            type="button"
-            class="mr-2 grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-white/10 hover:text-foreground"
-            aria-label="Clear search"
-            onclick={() => (query = '')}
-          >
-            <X class="size-3.5" />
-          </button>
-        {:else}
-          <kbd
-            class="mr-3 rounded-md border border-white/10 px-1.5 text-[0.65rem] text-muted-foreground"
-            >/</kbd
-          >
-        {/if}
-      </label>
-    </div>
+  <!-- The filters under the headline; once they scroll up to the site bar
+       they dock into it (the bar renders barFilters) and fade out here. -->
+  <div
+    bind:this={filterRow}
+    class="filter-row mb-10"
+    class:docked={filtersDocked}
+    inert={filtersDocked}
+  >
+    <ShipFilters races={raceTabs} bind:race bind:query bind:this={pageFilters} />
   </div>
 
-  <div>
+  <!-- At least a screen tall, so a short result list can still scroll the
+       filter row up under the bar and keep it docked there. -->
+  <div bind:this={results} class="min-h-dvh">
     <div class="min-w-0">
       {#each shelves as shelf (shelf.group.id)}
         <section class="reveal mb-12">
@@ -321,7 +339,7 @@
      own stacking context, so they cannot share one element. The frame runs
      past the right edge so only its left corners show. -->
 <div
-  class="explorer peek pointer-events-none fixed top-[3.75rem] right-[-3rem] bottom-3 z-0 hidden rounded-l-[2.25rem] transition-[background] duration-700 lg:block"
+  class="explorer peek pointer-events-none fixed top-[4.5rem] right-[-3rem] bottom-3 z-0 hidden rounded-l-[2.25rem] transition-[background] duration-700 lg:block"
   style:background="radial-gradient(70% 55% at 40% 50%, color-mix(in oklab, {dockTint} 20%, transparent),
   transparent 70%), linear-gradient(90deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.015) 40%)"
   use:dockTarget
@@ -340,7 +358,7 @@
 
 {#if docked}
   <div
-    class="explorer peek pointer-events-none fixed top-[3.75rem] right-0 bottom-3 z-20 hidden flex-col justify-between p-9 lg:flex"
+    class="explorer peek pointer-events-none fixed top-[4.5rem] right-0 bottom-3 z-20 hidden flex-col justify-between p-9 lg:flex"
   >
     {#key docked.id}
       <div class="peek-label">
@@ -404,5 +422,15 @@
     .peek-label {
       animation: none;
     }
+  }
+  /* Fades up and out as it docks into the site bar, and back on the way down. */
+  .filter-row {
+    transition:
+      opacity 0.35s var(--ease-apple),
+      translate 0.5s var(--ease-apple);
+  }
+  .filter-row.docked {
+    opacity: 0;
+    translate: 0 -0.75rem;
   }
 </style>
