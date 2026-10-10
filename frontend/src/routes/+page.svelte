@@ -1,10 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ArrowRight, LoaderCircle } from '@lucide/svelte';
-  import GameImage from '$lib/components/game-image.svelte';
+  import ShipThumbnail from '$lib/components/ship-thumbnail.svelte';
   import FactionEmblem from '$lib/components/faction-emblem.svelte';
   import Logo from '$lib/components/logo.svelte';
-  import { raceTint, typeRender } from '$lib/eve';
+  import { raceTint } from '$lib/eve';
   import ShipFilters from '$lib/components/ship-filters.svelte';
   import StageAlert from '$lib/components/stage-alert.svelte';
   import { nav } from '$lib/nav.svelte';
@@ -297,10 +297,11 @@
                       ? 'shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1.5px_rgb(255_255_255/0.5)]'
                       : ''}"
                   >
-                    <GameImage
-                      src={typeRender(ship.id, 256)}
-                      alt=""
-                      class="h-full w-full object-cover transition-transform duration-700 ease-[var(--ease-apple)] group-hover:-translate-y-[3%] group-hover:scale-[1.1]"
+                    <ShipThumbnail
+                      id={ship.id}
+                      raceId={ship.race_id}
+                      logoUrl={ship.faction_id != null ? factionLogos.get(ship.faction_id) : null}
+                      class="h-full w-full transition-transform duration-700 ease-[var(--ease-apple)] group-hover:-translate-y-[3%] group-hover:scale-[1.1]"
                     >
                       {#snippet fallback()}
                         <div
@@ -311,7 +312,7 @@
                           <Logo class="size-10 text-foreground/25" />
                         </div>
                       {/snippet}
-                    </GameImage>
+                    </ShipThumbnail>
                   </div>
                 </div>
                 <p

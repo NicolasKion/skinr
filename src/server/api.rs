@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
         .route("/skins/layers/{file}", get(skin_icon_layer))
         .route("/ships/{id}/skinrs", get(super::skinr::ship_skinrs))
         .route("/skinr/icons/{file}", get(super::skinr::component_icon))
+        .route("/thumbnails/{file}", get(thumbnail))
         .fallback(not_found)
 }
 
@@ -552,6 +553,37 @@ pub(super) fn png_response(png: Option<Vec<u8>>, missing: &str) -> Result<Respon
         png,
     )
         .into_response())
+}
+
+/// Thumbnails are re-rendered when the look changes, so they are cached briefly.
+const THUMBNAIL_CACHE_CONTROL: &str = "public, max-age=300";
+/// The themes a thumbnail is rendered in.
+const THUMBNAIL_THEMES: [&str; 2] = ["dark", "light"];
+
+/// A ship's rendered thumbnail, by `<type id>-<theme>.png`. Only names of that
+/// shape are read, so a request can never reach outside the directory.
+async fn thumbnail(State(state): State<AppState>, Path(file): Path<String>) -> Response {
+    let valid = file
+        .strip_suffix(".png")
+        .and_then(|name| name.split_once('-'))
+        .is_some_and(|(id, theme)| id.parse::<u32>().is_ok() && THUMBNAIL_THEMES.contains(&theme));
+    if !valid {
+        return not_found().await;
+    }
+    match tokio::fs::read(state.thumbnails.join(&file)).await {
+        Ok(png) => (
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("image/png")),
+                (
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static(THUMBNAIL_CACHE_CONTROL),
+                ),
+            ],
+            png,
+        )
+            .into_response(),
+        Err(_) => error(StatusCode::NOT_FOUND, "Thumbnail not found."),
+    }
 }
 
 /// A sheet attribute's in-game icon, by `<attribute name>.png`.

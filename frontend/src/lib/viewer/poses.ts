@@ -1,8 +1,12 @@
 // Camera poses: the angles pages frame a ship from. Kept apart from the
 // renderer so page state can name them without loading the engine.
 
+/** The resting angle: slightly above the ship, three-quarter view. */
+export const REST_YAW = 0.6;
 /** The resting pitch: slightly above the ship. */
 export const REST_PITCH = 0.22;
+/** The camera's vertical field of view, in radians. */
+export const FIELD_OF_VIEW = Math.PI / 4;
 
 /**
  * A camera pose. One with a `yaw` holds that angle; one without spins slowly.
@@ -13,6 +17,12 @@ export interface CameraPose {
   pitch: number;
   zoom?: number;
 }
+
+/**
+ * The thumbnails' angle (scripts/render-thumbnails.ts): the hero view's
+ * resting three-quarter angle, held, so every ship is shown the same way.
+ */
+export const THUMBNAIL_POSE = { yaw: REST_YAW, pitch: REST_PITCH };
 
 /** The three-quarter hero view, slowly spinning. */
 export const HERO_POSE: CameraPose = { pitch: REST_PITCH };

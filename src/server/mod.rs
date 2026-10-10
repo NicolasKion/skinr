@@ -5,6 +5,8 @@
 pub mod api;
 pub mod skinr;
 
+use std::path::PathBuf;
+
 use axum::Router;
 use axum::extract::FromRef;
 use axum::routing::get;
@@ -15,6 +17,16 @@ use crate::cdn::{self, CdnClient};
 /// The default bind address of the API; the dev proxy and Caddy point at it.
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:3100";
 
+/// Where `frontend/scripts/render-thumbnails.ts` writes ship thumbnails.
+const DEFAULT_THUMBNAILS_DIR: &str = "storage/thumbnails";
+
+/// The thumbnail directory from `THUMBNAILS_DIR`, with the local default.
+pub fn thumbnails_dir() -> PathBuf {
+    std::env::var("THUMBNAILS_DIR")
+        .unwrap_or_else(|_| DEFAULT_THUMBNAILS_DIR.to_owned())
+        .into()
+}
+
 /// The listen address from `BIND_ADDR`, with the local default.
 pub fn bind_addr() -> String {
     std::env::var("BIND_ADDR").unwrap_or_else(|_| DEFAULT_BIND_ADDR.to_owned())
@@ -24,6 +36,8 @@ pub fn bind_addr() -> String {
 pub struct AppState {
     pub pool: PgPool,
     pub cdn: CdnClient,
+    /// Rendered ship thumbnails (`<id>-<theme>.png`), served under /api/thumbnails.
+    pub thumbnails: PathBuf,
 }
 
 impl FromRef<AppState> for PgPool {

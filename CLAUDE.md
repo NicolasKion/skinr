@@ -96,6 +96,11 @@ theme or tooling, do what it does.
   after a new migration updates both.
 - `docker compose up -d postgres`, `cargo run`, then `npm run dev -- --port 5200`
   in `frontend/` for development (Postgres on 127.0.0.1:5434, API on 3100).
+- Ship thumbnails (`<id>-dark.png`, `<id>-light.png`) are rendered without a
+  browser: `deno run -A --node-modules-dir=manual scripts/render-thumbnails.ts`
+  in `frontend/` with the API up (`API=http://localhost:5200` for docker). It
+  writes `storage/thumbnails`, which the API serves at `/api/thumbnails`, and
+  skips ships already done, so an interrupted run just starts again.
 - Before committing: `cargo fmt`, `cargo clippy --all-targets` (zero warnings),
   `cargo test`, and in `frontend/` `npm run check`, `npm run lint`,
   `npm run format:check`, `npm test`.

@@ -45,6 +45,7 @@ async fn app() -> Router {
         // Never connected: these routes do not touch the database.
         pool: sqlx::PgPool::connect_lazy("postgres://unused@127.0.0.1:1/unused").unwrap(),
         cdn: CdnClient::new(&upstream, &upstream),
+        thumbnails: std::env::temp_dir(),
     })
 }
 

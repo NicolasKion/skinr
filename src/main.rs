@@ -26,6 +26,7 @@ async fn main() {
     let app = skinr::server::router(skinr::server::AppState {
         pool,
         cdn: skinr::cdn::CdnClient::from_env(),
+        thumbnails: skinr::server::thumbnails_dir(),
     });
 
     tracing::info!("listening on http://{addr}");

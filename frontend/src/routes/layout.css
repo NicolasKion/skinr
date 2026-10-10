@@ -48,6 +48,10 @@
   /* How much of the race tint colored type takes: tints are pale, so light
      pages darken them toward the foreground for contrast. */
   --tint-ink: 85%;
+  /* Ship cards glow in their race's color: this much of it at the middle,
+     this much at the edge. */
+  --race-backdrop-core: 40%;
+  --race-backdrop-edge: 16%;
   color-scheme: dark;
 }
 
@@ -79,6 +83,8 @@
   --shadow: rgb(0 0 0 / 0.14);
   --sheen-end: #6e6e73;
   --tint-ink: 50%;
+  --race-backdrop-core: 38%;
+  --race-backdrop-edge: 18%;
   color-scheme: light;
 }
 

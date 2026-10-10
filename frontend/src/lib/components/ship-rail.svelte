@@ -2,14 +2,14 @@
   // One row of related ships: a caption, a line on why they belong together,
   // and a carousel of cards (shadcn's Embla carousel): drag or swipe it, or
   // page through with the arrows; each end fades out while there is more to
-  // see that way. Each card shows CCP's render with a halo
+  // see that way. Each card shows the ship's thumbnail with a halo
   // in the ship's livery color on hover, its meta group as a badge when it is
   // anything but Tech I, and its class and race.
   import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-  import GameImage from '$lib/components/game-image.svelte';
+  import ShipThumbnail from '$lib/components/ship-thumbnail.svelte';
   import * as Carousel from '$lib/components/ui/carousel';
   import type { CarouselAPI } from '$lib/components/ui/carousel/context';
-  import { raceTint, typeRender } from '$lib/eve';
+  import { raceTint } from '$lib/eve';
   import type { MetaGroup, ShipSummary } from '$lib/types';
 
   let {
@@ -19,6 +19,7 @@
     groupNames,
     raceNames,
     metaGroups,
+    factionLogos,
     showClass = true,
     onpick,
   }: {
@@ -28,6 +29,8 @@
     groupNames: Map<number, string>;
     raceNames: Map<number, string>;
     metaGroups: Map<number, MetaGroup>;
+    /** Each faction's emblem, by faction id, watermarked behind its ships. */
+    factionLogos: Map<number, string | null>;
     /** Whether cards name their class; a rail of one class leaves it out. */
     showClass?: boolean;
     /** Called with the ship a card opens, before the navigation. */
@@ -109,10 +112,11 @@
               <div
                 class="relative aspect-square overflow-hidden rounded-[1.5rem] bg-foreground/[0.03] shadow-[0_30px_60px_-30px_var(--shadow),inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_4%,transparent)] transition-transform duration-500 ease-[var(--ease-apple)]"
               >
-                <GameImage
-                  src={typeRender(other.id, 256)}
-                  alt=""
-                  class="h-full w-full object-cover transition-transform duration-700 ease-[var(--ease-apple)] group-hover:-translate-y-[3%] group-hover:scale-[1.1]"
+                <ShipThumbnail
+                  id={other.id}
+                  raceId={other.race_id}
+                  logoUrl={other.faction_id != null ? factionLogos.get(other.faction_id) : null}
+                  class="h-full w-full transition-transform duration-700 ease-[var(--ease-apple)] group-hover:-translate-y-[3%] group-hover:scale-[1.1]"
                 />
                 {#if meta && meta.id !== TECH_ONE}
                   <span

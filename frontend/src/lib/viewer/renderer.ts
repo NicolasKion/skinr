@@ -31,8 +31,18 @@ import { CjsWebgpuDevice } from '@carbonenginejs/runtime/trinityal/webgpu';
 import { CjsWebgpuRenderContextAL, CjsWebgpuRenderTarget } from 'cjs-webgpu-internal';
 
 import { readBytes, type FileIndexLibrary } from './resources';
-import { HERO_POSE, REST_PITCH, TRANSITION_MS, easeInOut, type CameraPose } from './poses';
+import {
+  FIELD_OF_VIEW,
+  HERO_POSE,
+  REST_PITCH,
+  REST_YAW,
+  TRANSITION_MS,
+  easeInOut,
+  type CameraPose,
+} from './poses';
+import { alignBlockTextures } from './block-align';
 import { Hologram, gpuUsage } from './hologram';
+import { STUDIO_LOOK, applyLighting, placeSun, takeLighting } from './lighting';
 import { encodePng } from './png';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -65,8 +75,6 @@ const FLY_IN_FACTOR = 2.4;
 const DISTANCE_EASING = 2.2;
 /** How quickly the camera eases back to its resting pitch, per second. */
 const PITCH_EASING = 1.2;
-/** The resting angle: slightly above the ship, three-quarter view. */
-const REST_YAW = 0.6;
 interface CameraState {
   yaw: number;
   pitch: number;
@@ -78,25 +86,8 @@ interface CameraState {
 const HOLOGRAM_EASING = 3;
 /** How quickly the missing-resource glitch comes and goes, per second. */
 const GLITCH_EASING = 6;
-/**
- * The light theme's lighting. A ship lit for space reads as a dark silhouette
- * on a light page, so the sun, ambient fill and reflections are turned up (as
- * multiples of the scene's own) and the output gamma lowered (the scene's is
- * 1) to lift the dark plating. Neither does much alone; together they do.
- */
-const BRIGHT_LIGHTING = { sun: 2, ambient: 2.4, reflection: 1.4, gamma: 0.7 };
-/**
- * The sun rides with the camera, so whatever side of a ship is in view is
- * lit: it shines from this far to the left of the camera (radians of yaw)…
- */
-const KEY_LIGHT_YAW = -0.7;
-/** …and this far above it (radians of pitch), like a photographer's key light. */
-const KEY_LIGHT_PITCH = 0.55;
-/** How quickly the lighting moves between the two looks, per second. */
-const LIGHTING_EASING = 4;
 
 const MAX_PITCH = 1.5;
-const FIELD_OF_VIEW = Math.PI / 4;
 /** Livery carousel: the two ships never sit closer than this many combined radii. */
 const SLIDE_SPACING = 1.2;
 /**
@@ -318,16 +309,6 @@ export class ShipRenderer {
   /** 0 is a clean picture, 1 the full missing-resource glitch. */
   private glitchAmount = 0;
   private glitchTarget = 0;
-  /** 0 is the scene's own lighting, 1 the light theme's (BRIGHT_LIGHTING). */
-  private lightingAmount = 0;
-  private lightingTarget = 0;
-  /** The scene's own sun, ambient and reflection strength, scaled from. */
-  private baseLighting: {
-    sun: number[];
-    dynamicSun: number[];
-    ambient: number[];
-    reflection: number;
-  } | null = null;
   /** Called for every resource read that fails, with its res:/ path. */
   onMissing: ((path: string, error: Error) => void) | null = null;
   /**
@@ -444,6 +425,7 @@ export class ShipRenderer {
       adapter,
       deviceDescriptor: { requiredFeatures },
     });
+    alignBlockTextures(webgpu.GetDevice());
 
     const backBuffer = new CjsWebgpuRenderTarget(webgpu, {
       canvas: this.canvas,
@@ -467,15 +449,7 @@ export class ShipRenderer {
     }
 
     this.scene = await loadScene(DEFAULT_SCENE);
-    // The scene's sun ball would put the sun back where the system has it
-    // every update; the camera places it instead (updateCamera).
-    this.scene.sunBall = null;
-    this.baseLighting = {
-      sun: [...this.scene.sunDiffuseColor],
-      dynamicSun: [...this.scene.sunDiffuseColorWithDynamicLights],
-      ambient: [...this.scene.ambientColor],
-      reflection: this.scene.reflectionIntensity,
-    };
+    applyLighting(this.scene, takeLighting(this.scene), STUDIO_LOOK);
     this.view = new TriView();
     this.projection = new TriProjection();
 
@@ -893,29 +867,6 @@ export class ShipRenderer {
     this.glitchTarget = Math.min(1, Math.max(0, amount));
   }
 
-  /** Eases toward the light theme's brighter look (1) or the scene's own (0). */
-  setLighting(amount: number) {
-    this.lightingTarget = Math.min(1, Math.max(0, amount));
-  }
-
-  /** Writes the lighting for the current amount into the scene. */
-  private applyLighting() {
-    const base = this.baseLighting;
-    if (!base) return;
-    const scale = (bright: number) => 1 + (bright - 1) * this.lightingAmount;
-    // Color channels only; alpha stays as the scene has it. The scene lights
-    // with either sun color, depending on dynamic lighting.
-    for (let channel = 0; channel < 3; channel++) {
-      this.scene.sunDiffuseColor[channel] = base.sun[channel] * scale(BRIGHT_LIGHTING.sun);
-      this.scene.sunDiffuseColorWithDynamicLights[channel] =
-        base.dynamicSun[channel] * scale(BRIGHT_LIGHTING.sun);
-      this.scene.ambientColor[channel] = base.ambient[channel] * scale(BRIGHT_LIGHTING.ambient);
-    }
-    this.scene.reflectionIntensity = base.reflection * scale(BRIGHT_LIGHTING.reflection);
-    // A runtime setting rather than a scene property: every scene draws with it.
-    (EveSpaceScene as any).eveSpaceSceneGammaBrightness = scale(BRIGHT_LIGHTING.gamma);
-  }
-
   /** Fades toward the fitting window hologram (1) or the normal render (0). */
   setHologram(amount: number) {
     this.hologramTarget = Math.min(1, Math.max(0, amount));
@@ -1015,14 +966,6 @@ export class ShipRenderer {
       (this.glitchTarget - this.glitchAmount) * (1 - Math.exp(-seconds * GLITCH_EASING));
     if (Math.abs(this.glitchTarget - this.glitchAmount) < 1e-3) {
       this.glitchAmount = this.glitchTarget;
-    }
-    if (this.lightingAmount !== this.lightingTarget) {
-      this.lightingAmount +=
-        (this.lightingTarget - this.lightingAmount) * (1 - Math.exp(-seconds * LIGHTING_EASING));
-      if (Math.abs(this.lightingTarget - this.lightingAmount) < 1e-3) {
-        this.lightingAmount = this.lightingTarget;
-      }
-      this.applyLighting();
     }
     try {
       this.warmIncoming();
@@ -1149,17 +1092,6 @@ export class ShipRenderer {
     this.device.InitD3DDevice();
   }
 
-  /** Points the sun the way the camera looks, from KEY_LIGHT_YAW/PITCH off it. */
-  private placeSun() {
-    const yaw = this.yaw + KEY_LIGHT_YAW;
-    const pitch = Math.min(Math.PI / 2 - 0.01, this.pitch + KEY_LIGHT_PITCH);
-    const c = Math.cos(pitch);
-    // sunDirection is the way the light travels: from the light toward the ship.
-    this.scene.sunDirection[0] = -c * Math.sin(yaw);
-    this.scene.sunDirection[1] = -Math.sin(pitch);
-    this.scene.sunDirection[2] = -c * Math.cos(yaw);
-  }
-
   private updateCamera() {
     const [tx, ty, tz] = this.target;
     // Blend the framing by visible half-height rather than by distance, so the
@@ -1182,7 +1114,7 @@ export class ShipRenderer {
       -Math.sin(this.pitch) * Math.cos(this.yaw),
     ];
     this.view.SetLookAtPosition(eye, this.target, up);
-    this.placeSun();
+    placeSun(this.scene, this.yaw, this.pitch);
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const near = Math.max(0.1, distance / 100);
     const far = distance * 20;

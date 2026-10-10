@@ -60,6 +60,9 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       # Names the app to ESI, ideally with a contact (see .env.example).
       ESI_USER_AGENT: ${ESI_USER_AGENT:-skinr.space/0.1}
+    volumes:
+      # Ship thumbnails from frontend/scripts/render-thumbnails.ts, rendered on the host.
+      - ./storage/thumbnails:/app/storage/thumbnails:ro
     depends_on:
       postgres:
         condition: service_healthy

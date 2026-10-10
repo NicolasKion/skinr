@@ -235,6 +235,9 @@
   const raceNames = $derived(new Map(data.catalog.races.map((race) => [race.id, race.name])));
   const groupNames = $derived(new Map(data.catalog.groups.map((group) => [group.id, group.name])));
   const metaGroups = $derived(new Map(data.catalog.meta_groups.map((meta) => [meta.id, meta])));
+  const factionLogos = $derived(
+    new Map(data.catalog.factions.map((faction) => [faction.id, faction.logo_url])),
+  );
 
   /** The most cards a rail lists. */
   const RAIL_LIMIT = 24;
@@ -574,6 +577,7 @@
               {groupNames}
               {raceNames}
               {metaGroups}
+              {factionLogos}
               showClass={rail.showClass ?? true}
               onpick={(other) => (stage.morphId = other.id)}
             />
