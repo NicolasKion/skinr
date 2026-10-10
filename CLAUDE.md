@@ -39,8 +39,9 @@ theme or tooling, do what it does.
   for a mode change; the dock is the same canvas scaled and clipped.
 - From the blueprint chapter down the stage docks into the sheet's side
   elevation (`stage.blueprintFit` frames it at the drawing's scale) and stays
-  there. The livery and SKINR sections show their own views of the same ship
-  instead (see the section views below).
+  there. The livery chapter shows its own view of the same ship instead (see
+  the section views below), with two rails (`$lib/components/skin-rail.svelte`):
+  the game's skins and the players' SKINR designs.
 - The chapter effect on the ship page alone sets `stage.mode`.
 - The site bar (`$lib/components/site-bar.svelte`) lives in the root layout;
   pages put their breadcrumb, section links and reset action into
@@ -73,7 +74,7 @@ theme or tooling, do what it does.
   a design into SOF DNA (`material?…`) plus a synthetic SOF pattern for its
   projected layers (`$lib/skinr.ts`), registered with the engine before the
   build (`stage.pattern`, `engine.registerPattern`).
-- Chapters with their own ship (liveries, SKINRs) use
+- Chapters with their own ship (the liveries) use
   `$lib/components/section-stage.svelte`; each section view has a key and its
   own canvas and camera in the renderer (`sectionCanvas`, `setSectionView`).
 - The fitting window look is our own WebGPU pass (`frontend/src/lib/viewer/hologram.ts`)

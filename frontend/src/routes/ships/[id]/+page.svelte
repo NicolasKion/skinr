@@ -7,8 +7,8 @@
   import FactionEmblem from '$lib/components/faction-emblem.svelte';
   import GameImage from '$lib/components/game-image.svelte';
   import SectionStage from '$lib/components/section-stage.svelte';
-  import SkinrDesigns from '$lib/components/skinr-designs.svelte';
-  import { skinrLook } from '$lib/skinr';
+  import SkinRail from '$lib/components/skin-rail.svelte';
+  import { skinrIcon, skinrLook } from '$lib/skinr';
   import SheetMargin from '$lib/components/sheet-margin.svelte';
   import ShipRail from '$lib/components/ship-rail.svelte';
   import SkinIcon from '$lib/components/skin-icon.svelte';
@@ -94,7 +94,7 @@
    * the stage sits (beside the chapter's text on wide screens) and the camera
    * angle. The chapter crossing the middle of the screen is the active one.
    */
-  type Chapter = 'hero' | 'profile' | 'blueprint' | 'liveries' | 'skinrs' | 'more';
+  type Chapter = 'hero' | 'profile' | 'blueprint' | 'liveries' | 'more';
   const RIGHT: StagePlacement = { x: 0.2, scale: 0.8 };
   /**
    * How each chapter frames the main ship. From the blueprint on it glides
@@ -107,7 +107,6 @@
     profile: { placement: RIGHT, pose: SIDE_POSE, dim: 0 },
     blueprint: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
     liveries: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
-    skinrs: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
     more: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
   };
 
@@ -120,9 +119,7 @@
   const wide = $derived(innerWidth >= SIDE_BY_SIDE_MIN_WIDTH);
   const framing = $derived(CHAPTERS[chapter]);
   /** From the blueprint down, the main ship sits in the drawing. */
-  const docked = $derived(
-    chapter === 'blueprint' || chapter === 'liveries' || chapter === 'skinrs' || chapter === 'more',
-  );
+  const docked = $derived(chapter === 'blueprint' || chapter === 'liveries' || chapter === 'more');
   const placement = $derived(wide ? framing.placement : CENTER);
 
   /**
@@ -194,10 +191,22 @@
     ...ship.skins,
   ]);
   const liveryName = $derived(skin?.name ?? 'Standard issue');
+  /** Whether the ship has anything to wear besides its own colors. */
+  const wearable = $derived(ship.skins.length > 0 || skinrs.designs.length > 0);
 
+  // The livery chapter's two rails: the game's own skins, the players' designs.
+  const liveryKey = (id: number | null) => `skin-${id ?? 'standard'}`;
+  const skinItems = $derived(
+    liveries.map((livery) => ({ key: liveryKey(livery.id), name: livery.name, livery })),
+  );
+  const designItems = $derived(
+    skinrs.designs.map((design) => ({ key: design.id, name: design.name, design })),
+  );
+  const plex = new Intl.NumberFormat('en-US');
   /**
-   * Arrow keys step through a carousel, wrapping around: the player designs
-   * while their chapter is the active one, the liveries everywhere else.
+   * Arrow keys step through a carousel, wrapping around: in the livery
+   * chapter, the rail of the look on the ship (the player designs while one
+   * is worn), the liveries everywhere else.
    */
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -206,13 +215,9 @@
     const step = event.key === 'ArrowRight' ? 1 : -1;
     const wrap = (index: number, length: number) => (index + step + length) % length;
     event.preventDefault();
-    if (chapter === 'skinrs' && skinrs.designs.length) {
+    if (chapter === 'liveries' && skinrDesign) {
       const designs = skinrs.designs;
-      // From no design yet, right starts at the first and left at the last.
-      const current = designs.findIndex((design) => design.id === skinrId);
-      const next =
-        current < 0 ? (step === 1 ? 0 : designs.length - 1) : wrap(current, designs.length);
-      selectSkinr(designs[next], step);
+      selectSkinr(designs[wrap(designs.indexOf(skinrDesign), designs.length)], step);
       return;
     }
     const order = liveries.map((livery) => livery.id);
@@ -296,7 +301,6 @@
     profile: 'profile',
     blueprint: 'blueprint',
     liveries: 'liveries',
-    skinrs: 'skinrs',
     more: 'related',
   };
 
@@ -306,8 +310,7 @@
     nav.sections = [
       ...(ship.description ? [{ id: 'profile', label: 'Profile' }] : []),
       { id: 'blueprint', label: 'Blueprint' },
-      ...(ship.skins.length ? [{ id: 'liveries', label: 'Liveries' }] : []),
-      ...(skinrs.designs.length ? [{ id: 'skinrs', label: 'SKINR' }] : []),
+      ...(wearable ? [{ id: 'liveries', label: 'Liveries' }] : []),
       ...(rails.length ? [{ id: 'related', label: 'Related' }] : []),
     ];
     nav.reset = () => stage.resetView?.();
@@ -482,7 +485,7 @@
       </div>
     </section>
 
-    {#if ship.skins.length}
+    {#if wearable}
       <section id="liveries" class="chapter relative" use:chapterOf={'liveries'}>
         <SectionStage
           key="liveries"
@@ -495,65 +498,69 @@
         <div class="chapter-text relative">
           <p class="reveal eyebrow mb-4" style:color={tint}>Liveries</p>
           <h2 class="reveal display mb-4 text-[clamp(2.25rem,4vw,3.5rem)]">
-            <span class="text-sheen">{liveries.length} ways to wear it.</span>
+            <span class="text-sheen"
+              >{liveries.length + skinrs.designs.length} ways to wear it.</span
+            >
           </h2>
           <p class="reveal mb-10 max-w-md text-muted-foreground">
-            Every skin on Tranquility that recolors the {ship.name}. Now showing
-            <span class="text-foreground">{liveryName}</span>.
+            Every skin on Tranquility that recolors the {ship.name}{#if skinrs.designs.length}, and
+              the designs capsuleers made for it on the Paragon Hub{/if}.
           </p>
-          <div class="reveal grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-x-2 gap-y-5">
-            {#each liveries as livery (livery.id ?? 'standard')}
-              <button
-                type="button"
-                class="group flex flex-col items-center gap-2.5 text-center"
-                onclick={() => selectSkin(livery.id)}
-              >
-                <SkinIcon
-                  iconUrl={livery.icon_url}
-                  iconColors={livery.icon_colors}
-                  colors={livery.colors}
-                  selected={skinId === livery.id}
-                  class="size-14 group-hover:-translate-y-1"
-                />
-                <span
-                  class="line-clamp-2 text-[0.72rem] leading-snug transition-colors {skinId ===
-                  livery.id
-                    ? 'text-foreground'
-                    : 'text-muted-foreground group-hover:text-foreground'}"
-                >
-                  {livery.name}
-                </span>
-              </button>
-            {/each}
-          </div>
-        </div>
-      </section>
-    {/if}
 
-    {#if skinrs.designs.length}
-      <section id="skinrs" class="chapter relative" use:chapterOf={'skinrs'}>
-        <SectionStage
-          key="skinrs"
-          pose={FRONT_POSE}
-          {tint}
-          logoUrl={ship.faction?.logo_url ?? null}
-          {wide}
-          placement={RIGHT}
-        />
-        <div class="chapter-text relative">
-          <p class="reveal eyebrow mb-4" style:color={tint}>SKINR</p>
-          <h2 class="reveal display mb-4 text-[clamp(2.25rem,4vw,3.5rem)]">
-            <span class="text-sheen">Made by players.</span>
-          </h2>
-          <p class="reveal mb-10 max-w-md text-muted-foreground">
-            Designs capsuleers made for the {ship.name}, on the Paragon Hub right now.
-          </p>
-          <SkinrDesigns
-            designs={skinrs.designs}
-            components={skinrs.components}
-            selected={skinrDesign}
-            onselect={selectSkinr}
-          />
+          <!-- The look on the ship, from either rail. -->
+          <div class="reveal mb-6 min-h-14">
+            <p class="truncate text-2xl font-semibold tracking-tight">
+              {skinrDesign?.name ?? liveryName}
+            </p>
+            <p class="mt-1 truncate text-sm text-muted-foreground">
+              {#if skinrDesign}
+                SKINR by <span class="text-foreground"
+                  >{skinrDesign.creator.name ?? 'a capsuleer'}</span
+                >{#if skinrDesign.min_price_plex !== null}{` · ${plex.format(skinrDesign.min_price_plex)} PLEX`}{/if}
+              {:else if skin}
+                In-game skin
+              {:else}
+                The hull's own colors
+              {/if}
+            </p>
+          </div>
+
+          <div class="space-y-4">
+            <SkinRail
+              label="In-game"
+              items={skinItems}
+              selected={skinrDesign ? null : liveryKey(skinId)}
+              onselect={(item) => selectSkin(item.livery.id)}
+            >
+              {#snippet icon(item, selected)}
+                <SkinIcon
+                  iconUrl={item.livery.icon_url}
+                  iconColors={item.livery.icon_colors}
+                  colors={item.livery.colors}
+                  {selected}
+                  class="size-14"
+                />
+              {/snippet}
+            </SkinRail>
+            {#if designItems.length}
+              <SkinRail
+                label="SKINR"
+                items={designItems}
+                selected={skinrDesign?.id ?? null}
+                onselect={(item) => selectSkinr(item.design)}
+              >
+                {#snippet icon(item, selected)}
+                  {@const look = skinrIcon(item.design, skinrs.components)}
+                  <SkinIcon
+                    colors={look.colors}
+                    patterns={look.patterns}
+                    {selected}
+                    class="size-14"
+                  />
+                {/snippet}
+              </SkinRail>
+            {/if}
+          </div>
         </div>
       </section>
     {/if}
