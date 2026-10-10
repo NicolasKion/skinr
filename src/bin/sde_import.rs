@@ -12,9 +12,9 @@ use std::path::Path;
 
 use futures_util::StreamExt;
 
-use ship_viewer::db;
-use ship_viewer::sde::client::{ClientResources, Error, REQUIRED_FILES, SdeClient, extract_files};
-use ship_viewer::sde::{logos, parse, seed};
+use skinr::db;
+use skinr::sde::client::{ClientResources, Error, REQUIRED_FILES, SdeClient, extract_files};
+use skinr::sde::{logos, parse, seed};
 
 /// Where the client keeps an icon per skin material, named by material id.
 const SKIN_ICON_DIR: &str = "res:/ui/texture/classes/skins/icons";

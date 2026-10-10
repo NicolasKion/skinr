@@ -6,8 +6,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::routing::get;
 use http_body_util::BodyExt;
-use ship_viewer::cdn::CdnClient;
-use ship_viewer::server::{AppState, router};
+use skinr::cdn::CdnClient;
+use skinr::server::{AppState, router};
 use tower::ServiceExt;
 
 /// Serves a fixed build pointer and one resource file, 403 for anything else

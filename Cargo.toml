@@ -1,10 +1,10 @@
 [package]
-name = "ship-viewer"
+name = "skinr"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "Browse and view EVE Online ships in the browser"
-default-run = "ship-viewer"
+default-run = "skinr"
 
 [dependencies]
 axum = "0.8"
@@ -36,7 +36,7 @@ http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 
 [[bin]]
-name = "ship-viewer"
+name = "skinr"
 path = "src/main.rs"
 
 [[bin]]

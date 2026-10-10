@@ -4,7 +4,7 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
 /// The local docker-compose Postgres (see `docker-compose.yml`).
-pub const DEFAULT_DATABASE_URL: &str = "postgres://shipviewer:shipviewer@127.0.0.1:5434/shipviewer";
+pub const DEFAULT_DATABASE_URL: &str = "postgres://skinr:skinr@127.0.0.1:5434/skinr";
 
 /// Enough for the request handlers and the importer side by side.
 const MAX_POOL_CONNECTIONS: u32 = 10;

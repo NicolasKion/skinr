@@ -1,6 +1,6 @@
 #[tokio::main]
 async fn main() {
-    // Structured logs; tune with RUST_LOG (e.g. RUST_LOG=ship_viewer=debug).
+    // Structured logs; tune with RUST_LOG (e.g. RUST_LOG=skinr=debug).
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -11,18 +11,16 @@ async fn main() {
     // Local configuration from .env, if present; real environment wins.
     dotenvy::dotenv().ok();
 
-    let addr = ship_viewer::server::bind_addr();
+    let addr = skinr::server::bind_addr();
 
-    let pool = ship_viewer::db::connect()
-        .await
-        .expect("database connection");
-    ship_viewer::db::migrate(&pool)
+    let pool = skinr::db::connect().await.expect("database connection");
+    skinr::db::migrate(&pool)
         .await
         .expect("database migrations");
 
-    let app = ship_viewer::server::router(ship_viewer::server::AppState {
+    let app = skinr::server::router(skinr::server::AppState {
         pool,
-        cdn: ship_viewer::cdn::CdnClient::from_env(),
+        cdn: skinr::cdn::CdnClient::from_env(),
     });
 
     tracing::info!("listening on http://{addr}");

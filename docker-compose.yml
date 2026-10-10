@@ -7,6 +7,9 @@
 # Rebuild the API and frontend whenever their code changes:
 #   docker compose watch
 
+# The compose project: names the containers, network and volumes.
+name: skinr
+
 x-logging: &logging
   driver: json-file
   options:
@@ -17,15 +20,15 @@ services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_USER: shipviewer
-      POSTGRES_PASSWORD: shipviewer
-      POSTGRES_DB: shipviewer
+      POSTGRES_USER: skinr
+      POSTGRES_PASSWORD: skinr
+      POSTGRES_DB: skinr
     ports:
       - "127.0.0.1:5434:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U shipviewer"]
+      test: ["CMD-SHELL", "pg_isready -U skinr"]
       interval: 2s
       timeout: 5s
       retries: 30
@@ -36,10 +39,10 @@ services:
     build: .
     # One image with the API, so a rebuild never leaves the importer behind
     # on an older set of migrations.
-    image: ship-viewer:latest
+    image: skinr:latest
     command: ["sde_import"]
     environment:
-      DATABASE_URL: postgres://shipviewer:shipviewer@postgres:5432/shipviewer
+      DATABASE_URL: postgres://skinr:skinr@postgres:5432/skinr
       SDE_FORCE: ${SDE_FORCE:-0}
     volumes:
       - sde-cache:/app/storage/sde
@@ -50,9 +53,9 @@ services:
 
   api:
     build: .
-    image: ship-viewer:latest
+    image: skinr:latest
     environment:
-      DATABASE_URL: postgres://shipviewer:shipviewer@postgres:5432/shipviewer
+      DATABASE_URL: postgres://skinr:skinr@postgres:5432/skinr
       BIND_ADDR: 0.0.0.0:3100
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:

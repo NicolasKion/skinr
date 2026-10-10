@@ -18,17 +18,17 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY src src
 COPY migrations migrations
-RUN cargo build --release --bin ship-viewer --bin sde_import
+RUN cargo build --release --bin skinr --bin sde_import
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=builder /app/target/release/ship-viewer /app/target/release/sde_import /usr/local/bin/
+COPY --from=builder /app/target/release/skinr /app/target/release/sde_import /usr/local/bin/
 # sde_import caches the SDE zip under storage/sde (a volume in compose).
 RUN useradd --system --create-home --uid 10001 app \
     && mkdir -p storage/sde \
     && chown -R app:app /app
 USER app
-CMD ["ship-viewer"]
+CMD ["skinr"]
