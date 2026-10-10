@@ -82,6 +82,10 @@ pub struct Faction {
     pub name: String,
     /// The SDE's `flatLogo`, naming the emblem in the game client.
     pub logo: Option<String>,
+    /// EVE HTML, as the SDE has it.
+    pub description: String,
+    /// The SDE's `shortDescription`, a one-line motto; many factions have none.
+    pub tagline: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

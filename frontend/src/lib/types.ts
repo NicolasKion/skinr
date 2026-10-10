@@ -23,6 +23,13 @@ export interface FactionInfo {
   logo_url: string | null;
 }
 
+/** A ship's faction in full, for the blueprint's faction panel. */
+export interface FactionDetail extends FactionInfo {
+  /** A one-line motto; many factions have none. */
+  tagline: string | null;
+  description: string;
+}
+
 export interface ShipSummary {
   id: number;
   name: string;
@@ -85,7 +92,7 @@ export interface ShipDetail {
   description_rich: RichSegment[];
   group: Named;
   race: Named | null;
-  faction: FactionInfo | null;
+  faction: FactionDetail | null;
   meta_group: MetaGroup | null;
   tech_level: number | null;
   mass: number | null;

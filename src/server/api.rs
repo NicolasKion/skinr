@@ -67,6 +67,25 @@ struct FactionInfo {
     logo_url: Option<String>,
 }
 
+/// A ship's faction in full: its emblem, motto and description as plain text.
+#[derive(Serialize)]
+struct FactionDetail {
+    id: i32,
+    name: String,
+    logo_url: Option<String>,
+    tagline: Option<String>,
+    description: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct FactionDetailRow {
+    id: i32,
+    name: String,
+    logo_url: Option<String>,
+    tagline: Option<String>,
+    description: String,
+}
+
 /// Faction logos change only with a client patch; a day is plenty.
 const LOGO_CACHE_CONTROL: &str = "public, max-age=86400";
 
@@ -281,7 +300,7 @@ struct ShipDetail {
     description_rich: Vec<Segment>,
     group: Named,
     race: Option<Named>,
-    faction: Option<FactionInfo>,
+    faction: Option<FactionDetail>,
     meta_group: Option<MetaGroup>,
     tech_level: Option<i32>,
     mass: Option<f64>,
@@ -449,13 +468,23 @@ async fn ship(
         .map_err(database_error)?,
     );
     let faction = match row.faction_id {
-        Some(faction_id) => sqlx::query_as::<_, FactionInfo>(sqlx::AssertSqlSafe(format!(
-            "{FACTION_SELECT} where f.id = $1"
+        Some(faction_id) => sqlx::query_as::<_, FactionDetailRow>(sqlx::AssertSqlSafe(format!(
+            "select f.id, f.name, faction.logo_url, f.tagline, f.description
+             from factions f join ({FACTION_SELECT}) faction using (id) where f.id = $1"
         )))
         .bind(faction_id)
         .fetch_optional(&pool)
         .await
-        .map_err(database_error)?,
+        .map_err(database_error)?
+        .map(|faction| FactionDetail {
+            id: faction.id,
+            name: faction.name,
+            logo_url: faction.logo_url,
+            tagline: faction
+                .tagline
+                .map(|tagline| eve_html::plain_text(&tagline).trim().to_owned()),
+            description: eve_html::plain_text(&faction.description).trim().to_owned(),
+        }),
         None => None,
     };
     Ok(Json(ShipDetail {

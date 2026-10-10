@@ -119,6 +119,10 @@ struct FactionRow {
     name: Localized,
     #[serde(rename = "flatLogo")]
     flat_logo: Option<String>,
+    #[serde(default)]
+    description: Localized,
+    #[serde(rename = "shortDescription", default)]
+    short_description: Localized,
 }
 
 #[derive(Deserialize)]
@@ -333,6 +337,8 @@ pub fn parse<R: BufRead>(files: SdeFiles<R>) -> Result<ShipTables, Error> {
             id: row.id,
             name: row.name.text(),
             logo: row.flat_logo,
+            description: row.description.text(),
+            tagline: Some(row.short_description.text()).filter(|text| !text.is_empty()),
         })
         .collect();
     factions.sort_by_key(|faction| faction.id);
@@ -485,7 +491,7 @@ mod tests {
             skinr_component_categories: b"",
             skinr_slots_to_materials: b"",
             factions: concat!(
-                r#"{"_key": 500001, "name": {"en": "Caldari State"}, "flatLogo": "caldari_logo"}"#,
+                r#"{"_key": 500001, "name": {"en": "Caldari State"}, "flatLogo": "caldari_logo", "description": {"en": "Ruled by corporations."}, "shortDescription": {"en": "Duty first."}}"#,
                 "\n",
                 r#"{"_key": 500005, "name": {"en": "Jove Empire"}}"#,
             )
@@ -539,12 +545,16 @@ mod tests {
                 Faction {
                     id: 500001,
                     name: "Caldari State".into(),
-                    logo: Some("caldari_logo".into())
+                    logo: Some("caldari_logo".into()),
+                    description: "Ruled by corporations.".into(),
+                    tagline: Some("Duty first.".into()),
                 },
                 Faction {
                     id: 500005,
                     name: "Jove Empire".into(),
-                    logo: None
+                    logo: None,
+                    description: String::new(),
+                    tagline: None,
                 },
             ]
         );
