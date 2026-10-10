@@ -19,6 +19,11 @@ export interface Engine {
    * call overtook it (only the newest request ever reaches the screen).
    */
   show(dna: string, transition?: ShowTransition): Promise<boolean>;
+  /**
+   * Makes a pattern the SOF does not ship (a SKINR design's projections)
+   * available to DNA under `name`, as a raw EveSOFDataPattern record.
+   */
+  registerPattern(name: string, record: object): void;
 }
 
 let engine: Promise<Engine> | null = null;
@@ -54,6 +59,9 @@ async function start(onStage?: (stage: EngineStage) => void): Promise<Engine> {
   const ready: Engine = {
     build: String(library.build),
     renderer,
+    registerPattern(name: string, record: object) {
+      sof.dataMgr.UpdatePattern(name, record);
+    },
     async show(dna: string, transition: ShowTransition = { kind: 'fly' }) {
       const request = ++latest;
       if (dna === target) return true;

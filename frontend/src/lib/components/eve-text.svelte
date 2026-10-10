@@ -26,7 +26,7 @@
   {:else if segment.type_id}
     <a
       href="/ships/{segment.type_id}"
-      class="underline decoration-white/25 underline-offset-4 hover:decoration-current"
+      class="underline decoration-foreground/25 underline-offset-4 hover:decoration-current"
       class:font-bold={segment.bold}
       class:italic={segment.italic}
       style:color={segment.color}>{@render words(segment.text)}</a

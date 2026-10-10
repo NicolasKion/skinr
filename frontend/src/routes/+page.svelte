@@ -292,7 +292,7 @@
                     style:background="var(--glow)"
                   ></div>
                   <div
-                    class="relative aspect-square overflow-hidden rounded-[1.75rem] bg-white/[0.03] shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1px_rgb(255_255_255/0.04)] transition-transform duration-500 ease-[var(--ease-apple)] {stage
+                    class="relative aspect-square overflow-hidden rounded-[1.75rem] bg-foreground/[0.03] shadow-[0_30px_60px_-30px_var(--shadow),inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_4%,transparent)] transition-transform duration-500 ease-[var(--ease-apple)] {stage
                       .ship?.id === ship.id
                       ? 'shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1.5px_rgb(255_255_255/0.5)]'
                       : ''}"
@@ -308,7 +308,7 @@
                           style:background="radial-gradient(60% 60% at 50% 45%, color-mix(in oklab, {tint}
                           22%, transparent), transparent)"
                         >
-                          <Logo class="size-10 text-white/25" />
+                          <Logo class="size-10 text-foreground/25" />
                         </div>
                       {/snippet}
                     </GameImage>
@@ -341,7 +341,8 @@
 <div
   class="explorer peek pointer-events-none fixed top-[4.5rem] right-[-3rem] bottom-3 z-0 hidden rounded-l-[2.25rem] transition-[background] duration-700 lg:block"
   style:background="radial-gradient(70% 55% at 40% 50%, color-mix(in oklab, {dockTint} 20%, transparent),
-  transparent 70%), linear-gradient(90deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.015) 40%)"
+  transparent 70%), linear-gradient(90deg, color-mix(in oklab, var(--foreground) 5%, transparent), color-mix(in
+  oklab, var(--foreground) 1.5%, transparent) 40%)"
   use:dockTarget
 >
   {#if dockLogo}
@@ -383,7 +384,7 @@
       </span>
       <a
         href="/ships/{docked.id}"
-        class="pointer-events-auto flex items-center gap-1.5 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition-transform hover:scale-[1.03]"
+        class="pointer-events-auto flex items-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-transform hover:scale-[1.03]"
         onclick={() => (stage.morphId = null)}
       >
         Open <ArrowRight class="size-4" />
@@ -402,8 +403,8 @@
   }
   .peek.right-\[-3rem\] {
     box-shadow:
-      inset 1px 0 0 rgb(255 255 255 / 0.07),
-      -40px 0 80px -40px rgb(0 0 0 / 0.8);
+      inset 1px 0 0 color-mix(in oklab, var(--foreground) 7%, transparent),
+      -40px 0 80px -40px var(--shadow);
   }
   .peek-label {
     animation: label-in 0.7s var(--ease-out-expo) both;

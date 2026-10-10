@@ -21,6 +21,8 @@ pub fn router() -> Router<AppState> {
         .route("/icons/{file}", get(attribute_icon))
         .route("/skins/{file}", get(skin_icon))
         .route("/skins/layers/{file}", get(skin_icon_layer))
+        .route("/ships/{id}/skinrs", get(super::skinr::ship_skinrs))
+        .route("/skinr/icons/{file}", get(super::skinr::component_icon))
         .fallback(not_found)
 }
 
@@ -39,7 +41,7 @@ pub(crate) fn error(status: StatusCode, message: &str) -> Response {
         .into_response()
 }
 
-fn database_error(cause: sqlx::Error) -> Response {
+pub(super) fn database_error(cause: sqlx::Error) -> Response {
     tracing::error!(error = %cause, "database query failed");
     error(StatusCode::INTERNAL_SERVER_ERROR, "Database error.")
 }
@@ -249,6 +251,9 @@ struct Skin {
     colors: Colors,
     /// The game's icon for the skin material, when the client has one.
     icon_url: Option<String>,
+    /// That icon's colors (primary, secondary, hull, lights), so it can be
+    /// drawn sharp as vectors.
+    icon_colors: Option<serde_json::Value>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -256,6 +261,7 @@ struct SkinRow {
     skin_id: i32,
     material_id: Option<i32>,
     has_icon: bool,
+    icon_colors: Option<String>,
     name: String,
     sof_faction: String,
     color_primary: Option<String>,
@@ -389,7 +395,7 @@ async fn ship(
     let skins = sqlx::query_as::<_, SkinRow>(
         "select skin_id, ship_skins.material_id, name, sof_faction,
                 color_primary, color_secondary, color_hull,
-                skin_icons.material_id is not null as has_icon
+                skin_icons.material_id is not null as has_icon, skin_icons.colors as icon_colors
          from ship_skins left join skin_icons using (material_id)
          where ship_id = $1 order by name, skin_id",
     )
@@ -411,6 +417,10 @@ async fn ship(
             .material_id
             .filter(|_| skin.has_icon)
             .map(|material| format!("/api/skins/{material}.png")),
+        icon_colors: skin
+            .icon_colors
+            .as_deref()
+            .and_then(|colors| serde_json::from_str(colors).ok()),
     })
     .collect();
 
@@ -527,7 +537,7 @@ async fn logo(State(pool): State<PgPool>, Path(file): Path<String>) -> Result<Re
 }
 
 /// A stored client image as a long-cached PNG, or a 404 saying what is missing.
-fn png_response(png: Option<Vec<u8>>, missing: &str) -> Result<Response, Response> {
+pub(super) fn png_response(png: Option<Vec<u8>>, missing: &str) -> Result<Response, Response> {
     let Some(png) = png else {
         return Err(error(StatusCode::NOT_FOUND, missing));
     };

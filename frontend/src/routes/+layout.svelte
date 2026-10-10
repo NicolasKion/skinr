@@ -51,7 +51,7 @@
 
   {@render children()}
 
-  <footer class="relative z-20 border-t border-white/[0.06] bg-background">
+  <footer class="relative z-20 border-t border-foreground/[0.06] bg-background">
     <p class="mx-auto max-w-[90rem] px-6 py-6 text-[0.7rem] leading-relaxed text-muted-foreground">
       EVE Online and all related assets are the property of CCP hf. This tool is not affiliated with
       or endorsed by CCP. Ships are built live from the game client with CarbonEngineJS.

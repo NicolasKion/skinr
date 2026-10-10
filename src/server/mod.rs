@@ -3,6 +3,7 @@
 //! everything else to the frontend, so the browser only ever sees one origin.
 
 pub mod api;
+pub mod skinr;
 
 use axum::Router;
 use axum::extract::FromRef;

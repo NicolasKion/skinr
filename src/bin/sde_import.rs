@@ -14,6 +14,8 @@ use futures_util::StreamExt;
 
 use skinr::db;
 use skinr::sde::client::{ClientResources, Error, REQUIRED_FILES, SdeClient, extract_files};
+use skinr::sde::skin_icon_colors::{self, Rgba};
+use skinr::sde::skinr::swatch_color as ship_skinr_swatch;
 use skinr::sde::{logos, parse, seed};
 
 /// Where the client keeps an icon per skin material, named by material id.
@@ -77,6 +79,9 @@ async fn main() -> Result<(), Error> {
         dogma_units: open(11)?,
         type_bonus: open(12)?,
         icons: open(13)?,
+        skinr_components: open(14)?,
+        skinr_component_categories: open(15)?,
+        skinr_slots_to_materials: open(16)?,
     })?;
     println!(
         "parsed {} ships in {} groups, {} skins, {} attribute values, {} bonus lines",
@@ -173,6 +178,75 @@ async fn main() -> Result<(), Error> {
         "stored {} of {} skin icon layers",
         layers.len(),
         SKIN_ICON_LAYERS.len()
+    );
+
+    // Each skin's colors read back off its icon, so the frontend can draw the
+    // icon as vectors instead of the 64 px image.
+    let decoded: Option<Vec<Rgba>> = skin_icon_colors::LAYERS
+        .iter()
+        .map(|name| {
+            let (_, png) = layers.iter().find(|(layer, _)| layer == name)?;
+            Rgba::decode(png)
+        })
+        .collect();
+    if let Some(Ok(decoded)) = decoded.map(<[Rgba; 4]>::try_from) {
+        let colors: Vec<(i32, String)> = skin_icons
+            .iter()
+            .filter_map(|(material, png)| {
+                let colors = skin_icon_colors::icon_colors(&Rgba::decode(png)?, &decoded)?;
+                Some((*material, serde_json::to_string(&colors).ok()?))
+            })
+            .collect();
+        seed::store_skin_icon_colors(&pool, &colors).await?;
+        println!(
+            "read colors off {} of {} skin icons",
+            colors.len(),
+            skin_icons.len()
+        );
+    }
+
+    // The client's icon for each SKINR component, as the in-game designer shows it.
+    let components: Vec<(i32, String)> = tables
+        .skinr_components
+        .iter()
+        .filter_map(|component| Some((component.id, component.icon_file.clone()?)))
+        .collect();
+    let fetched: Vec<_> = futures_util::stream::iter(components.iter().cloned())
+        .map(|(id, path)| {
+            let resources = &resources;
+            async move { (id, path.clone(), resources.read(&path).await) }
+        })
+        .buffer_unordered(SKIN_ICON_FETCHES)
+        .collect()
+        .await;
+    let mut component_icons = Vec::new();
+    for (id, path, result) in fetched {
+        match result {
+            Ok(Some(png)) => component_icons.push((id, png)),
+            Ok(None) => {}
+            Err(error) => println!("could not fetch {path}: {error}"),
+        }
+    }
+    seed::store_skinr_component_icons(&pool, &component_icons).await?;
+    // Materials get a swatch color from their icon, so designs can be drawn
+    // as the game's SKIN hexagon; patterns are masks and have none.
+    let patterns: std::collections::HashSet<i32> = tables
+        .skinr_components
+        .iter()
+        .filter(|component| component.category == "Pattern")
+        .map(|component| component.id)
+        .collect();
+    let colors: Vec<(i32, String)> = component_icons
+        .iter()
+        .filter(|(id, _)| !patterns.contains(id))
+        .filter_map(|(id, png)| Some((*id, ship_skinr_swatch(png)?)))
+        .collect();
+    seed::store_skinr_component_colors(&pool, &colors).await?;
+    println!("sampled {} SKINR material colors", colors.len());
+    println!(
+        "stored {} of {} SKINR component icons",
+        component_icons.len(),
+        components.len()
     );
 
     Ok(())

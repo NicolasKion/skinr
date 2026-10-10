@@ -58,6 +58,8 @@ services:
       DATABASE_URL: postgres://skinr:skinr@postgres:5432/skinr
       BIND_ADDR: 0.0.0.0:3100
       RUST_LOG: ${RUST_LOG:-info}
+      # Names the app to ESI, ideally with a contact (see .env.example).
+      ESI_USER_AGENT: ${ESI_USER_AGENT:-skinr.space/0.1}
     depends_on:
       postgres:
         condition: service_healthy

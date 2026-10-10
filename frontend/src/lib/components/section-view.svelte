@@ -1,19 +1,22 @@
 <script lang="ts">
-  // The livery section's own view of the ship: the renderer draws it a second
-  // time from `pose` into renderer.liveryCanvas, hosted here, while the main
-  // stage stays docked in the blueprint above. It renders only while near the
-  // screen. Dragging it turns the ship.
+  // A page section's own view of the ship (the liveries, the SKINRs): the
+  // renderer draws the ship again from `pose` into the canvas of section
+  // `key`, hosted here, while the main stage stays docked in the blueprint
+  // above. It renders only while near the screen. Dragging it turns the ship.
   import { onMount } from 'svelte';
   import { getEngine } from '$lib/viewer/engine';
   import type { CameraPose } from '$lib/viewer/poses';
   import type { ShipRenderer } from '$lib/viewer/renderer';
 
   let {
+    key,
     pose,
     shift = 0,
     scale = 1,
     class: className = '',
   }: {
+    /** Which section view this is; each key has its own canvas and camera. */
+    key: string;
     pose: CameraPose;
     /** How far right of centre the ship sits, as a share of the width. */
     shift?: number;
@@ -38,13 +41,13 @@
       .catch(() => {});
     return () => {
       cancelled = true;
-      renderer?.setLiveryView(null);
+      renderer?.setSectionView(key, null);
     };
   });
 
   $effect(() => {
     if (!renderer || !host) return;
-    const canvas = renderer.liveryCanvas;
+    const canvas = renderer.sectionCanvas(key);
     host.append(canvas);
     return () => {
       if (canvas.parentElement === host) canvas.remove();
@@ -61,7 +64,7 @@
   });
 
   $effect(() => {
-    renderer?.setLiveryView({ pose, visible: live, shift, scale });
+    renderer?.setSectionView(key, { pose, visible: live, shift, scale });
   });
 </script>
 

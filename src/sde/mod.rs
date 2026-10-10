@@ -7,6 +7,8 @@ pub mod dogma;
 pub mod logos;
 pub mod parse;
 pub mod seed;
+pub mod skin_icon_colors;
+pub mod skinr;
 
 /// Everything the viewer stores from one SDE build.
 #[derive(Debug, Default)]
@@ -21,6 +23,8 @@ pub struct ShipTables {
     pub bonuses: Vec<ShipBonus>,
     /// The client icon of each sheet attribute: attribute name and `res:/` path.
     pub attribute_icons: Vec<dogma::AttributeIcon>,
+    pub skinr_components: Vec<skinr::SkinrComponent>,
+    pub skinr_slot_materials: Vec<skinr::SlotMaterial>,
 }
 
 /// One dogma attribute value of a ship, by attribute name.

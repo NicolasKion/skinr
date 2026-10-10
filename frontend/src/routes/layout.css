@@ -10,9 +10,13 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Always dark. Near-black surfaces, white type, and one accent that pages
-   tint per race through --tint (see $lib/eve raceTint). */
-:root {
+/* Dark by default: near-black surfaces, white type, and one accent that
+   pages tint per race through --tint (see $lib/eve raceTint). The light
+   theme (html.light, $lib/theme) swaps the same tokens; components draw with
+   the tokens, never with white or black, so both themes follow. A surface
+   that is dark in either theme (the blueprint paper) takes .theme-dark. */
+:root,
+.theme-dark {
   --radius: 1rem;
   --tint: #a1b5c9;
   --background: #050506;
@@ -33,6 +37,49 @@
   --input: oklch(1 0 0 / 12%);
   --ring: color-mix(in oklab, var(--tint) 60%, transparent);
   --destructive: oklch(0.704 0.191 22.216);
+  /* Frosted panels over the stage, and their hairline edge. */
+  --glass: oklch(0.18 0 0 / 55%);
+  --glass-strong: oklch(0.15 0 0 / 66%);
+  --glass-edge: oklch(1 0 0 / 9%);
+  /* Drop shadows under floating things. */
+  --shadow: rgb(0 0 0 / 0.7);
+  /* Big type fades from the foreground at the top to this at the bottom. */
+  --sheen-end: #8e8e93;
+  /* How much of the race tint colored type takes: tints are pale, so light
+     pages darken them toward the foreground for contrast. */
+  --tint-ink: 85%;
+  color-scheme: dark;
+}
+
+.theme-dark {
+  color: var(--foreground);
+}
+
+/* Light: Apple's off-white page, near-black type, white glass. */
+:root.light {
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #1d1d1f;
+  --primary-foreground: #f5f5f7;
+  --secondary: oklch(0 0 0 / 6%);
+  --secondary-foreground: #1d1d1f;
+  --muted: oklch(0 0 0 / 4%);
+  --muted-foreground: #6e6e73;
+  --accent-foreground: #f5f5f7;
+  --border: oklch(0 0 0 / 10%);
+  --input: oklch(0 0 0 / 14%);
+  --ring: color-mix(in oklab, var(--tint) 70%, black);
+  --glass: oklch(1 0 0 / 62%);
+  --glass-strong: oklch(1 0 0 / 72%);
+  --glass-edge: oklch(0 0 0 / 8%);
+  --shadow: rgb(0 0 0 / 0.14);
+  --sheen-end: #6e6e73;
+  --tint-ink: 50%;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -79,7 +126,6 @@
   html {
     @apply bg-background font-sans text-foreground antialiased;
     font-optical-sizing: auto;
-    color-scheme: dark;
   }
   body {
     @apply bg-background;
@@ -93,15 +139,15 @@
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: oklch(1 0 0 / 15%) transparent;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 15%, transparent) transparent;
   }
 }
 
 /* Frosted glass: the panels floating over the 3D stage. */
 @utility glass {
-  background: oklch(0.18 0 0 / 55%);
+  background: var(--glass);
   backdrop-filter: saturate(180%) blur(24px);
-  border: 1px solid oklch(1 0 0 / 9%);
+  border: 1px solid var(--glass-edge);
 }
 
 /* The small caps line above a headline. */
@@ -119,11 +165,16 @@
   line-height: 0.95;
 }
 
-/* White-to-grey sheen on large type. Put it on an inline span inside the
+/* Foreground-to-grey sheen on large type. Put it on an inline span inside the
    heading: an inline box's fill covers the font's full height, while a block
    with tight display line-height cuts off descenders (y, g, p). */
 @utility text-sheen {
-  background: linear-gradient(180deg, #ffffff 0%, #ffffff 35%, #8e8e93 100%);
+  background: linear-gradient(
+    180deg,
+    var(--foreground) 0%,
+    var(--foreground) 35%,
+    var(--sheen-end) 100%
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -133,9 +184,9 @@
 @utility text-tint-sheen {
   background: linear-gradient(
     100deg,
-    #ffffff 10%,
-    color-mix(in oklab, var(--tint) 85%, white) 55%,
-    #ffffff 90%
+    var(--foreground) 10%,
+    color-mix(in oklab, var(--tint) var(--tint-ink), var(--foreground)) 55%,
+    var(--foreground) 90%
   );
   -webkit-background-clip: text;
   background-clip: text;

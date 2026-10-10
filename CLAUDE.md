@@ -24,8 +24,14 @@ theme or tooling, do what it does.
 - Tests land with their code. Rust behavior tests drive the real router with
   external services replaced by local mocks on ephemeral ports.
 - The design is Apple-style, not MutaMarket's (`frontend/src/routes/layout.css`):
-  dark only, Inter, generous radii, a per-race `--tint`, `glass`/`display`/`reveal`
-  utilities, borderless surfaces (no boxed cards). Motion uses `--ease-apple`.
+  dark by default with a light theme, Inter, generous radii, a per-race `--tint`,
+  `glass`/`display`/`reveal` utilities, borderless surfaces (no boxed cards).
+  Motion uses `--ease-apple`.
+- Themes: `$lib/theme` keeps the choice in a cookie that `hooks.server.ts`
+  turns into the class on `<html>` (`dark` or `light`), so there is no flash.
+  Components use the tokens in `layout.css` (`foreground`, `--glass`,
+  `--shadow`, ...), never raw white or black. Surfaces that stay dark in both
+  themes (the blueprint paper) take `.theme-dark`.
 - One shared 3D stage (`$lib/stage.svelte.ts`, `$lib/components/stage.svelte`)
   lives in the root layout at z-10 with a transparent canvas. Pages set its mode
   (hero, dock, hidden) and ship; UI that must sit above it uses z-20, anything
@@ -33,9 +39,8 @@ theme or tooling, do what it does.
   for a mode change; the dock is the same canvas scaled and clipped.
 - From the blueprint chapter down the stage docks into the sheet's side
   elevation (`stage.blueprintFit` frames it at the drawing's scale) and stays
-  there. The livery section shows a second view of the same ship instead:
-  the renderer draws it into `renderer.liveryCanvas` each frame that section
-  is on screen (`setLiveryView`, `$lib/components/livery-view.svelte`).
+  there. The livery and SKINR sections show their own views of the same ship
+  instead (see the section views below).
 - The chapter effect on the ship page alone sets `stage.mode`.
 - The site bar (`$lib/components/site-bar.svelte`) lives in the root layout;
   pages put their breadcrumb, section links and reset action into
@@ -48,14 +53,29 @@ theme or tooling, do what it does.
   above the stage, and would hide the docked ship.
 - Attribute icons on the sheet are the client's own (`/api/icons/{attribute}.png`,
   fetched by the SDE import); use `$lib/components/attribute-icon.svelte`.
-- Liveries show the game's skin material icons (`/api/skins/{material}.png`).
-  A livery without one is composed from the client's tintable icon layers
-  (`/api/skins/layers/{layer}.png`) in CSS, not on a 2D canvas;
-  `$lib/components/skin-icon.svelte` does both.
+- Livery icons are the game's SKIN hexagon drawn as vectors
+  (`$lib/components/skin-hexagon.svelte`, shapes and shading traced from the
+  client's 64 px layers), so they stay sharp. In-game skins use the colors the
+  import reads back off their icon (`src/sde/skin_icon_colors.rs`), SKINR
+  designs their materials' swatch colors plus their patterns; the 64 px icon
+  (`/api/skins/{material}.png`) is only the fallback.
+  `$lib/components/skin-icon.svelte` picks.
 - A resource read that fails is reported by the renderer (`onMissing`) and
   collected in `stage.missing`; a broken ship glitches (the same post pass,
   `setGlitch`) and `$lib/components/stage-alert.svelte` says why. Runtime
   formats are opt-in: register any new one in `resMan.Register({ formats })`.
+- ESI goes through `src/esi/client.rs` only: it pins `COMPATIBILITY_DATE`
+  (undated requests get the 2020 API, without SKINR), names the app and backs
+  off on 420/429. Look routes up with the global `esi` skill, not from memory.
+- SKINR (player designs): the API syncs Paragon Hub listings, designs and
+  names (`src/esi/skinr.rs`, every 10 min, `ESI_SYNC=0` turns it off); the SDE
+  import adds the components and the faction slot mapping. The frontend turns
+  a design into SOF DNA (`material?…`) plus a synthetic SOF pattern for its
+  projected layers (`$lib/skinr.ts`), registered with the engine before the
+  build (`stage.pattern`, `engine.registerPattern`).
+- Chapters with their own ship (liveries, SKINRs) use
+  `$lib/components/section-stage.svelte`; each section view has a key and its
+  own canvas and camera in the renderer (`sectionCanvas`, `setSectionView`).
 - The fitting window look is our own WebGPU pass (`frontend/src/lib/viewer/hologram.ts`)
   over the finished frame, not a runtime wireframe mode (WebGPU has none).
 - The spec sheet reads only the dogma attributes listed in `src/sheet.rs`

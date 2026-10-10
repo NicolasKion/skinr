@@ -5,6 +5,7 @@
   // hero and dock is one smooth transform rather than a re-render at every size.
   import { onMount, untrack } from 'svelte';
   import { stage } from '$lib/stage.svelte';
+  import { theme } from '$lib/theme.svelte';
   import type { Engine, ShowTransition } from '$lib/viewer/engine';
   import { TRANSITION_MS, easeInOut } from '$lib/viewer/poses';
 
@@ -62,6 +63,7 @@
     stage.status = 'loading';
     stage.error = null;
     stage.missing = [];
+    if (stage.pattern) current.registerPattern(stage.pattern.name, stage.pattern.record);
     current
       .show(dna, transition)
       .then((shown) => {
@@ -222,6 +224,11 @@
 
   $effect(() => {
     engine?.renderer.setHologram(stage.hologram);
+  });
+
+  // Light pages get brighter lighting, so dark hulls do not read as murky.
+  $effect(() => {
+    engine?.renderer.setLighting(theme.current === 'light' ? 1 : 0);
   });
 
   // A broken ship shows as a broken signal.

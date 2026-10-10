@@ -66,7 +66,7 @@
     {#if query}
       <button
         type="button"
-        class="mr-1.5 grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-white/10 hover:text-foreground"
+        class="mr-1.5 grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
         aria-label="Clear search"
         onclick={() => (query = '')}
       >
@@ -74,7 +74,7 @@
       </button>
     {:else}
       <kbd
-        class="mr-2.5 rounded-md border border-white/10 px-1.5 text-[0.65rem] text-muted-foreground"
+        class="mr-2.5 rounded-md border border-foreground/10 px-1.5 text-[0.65rem] text-muted-foreground"
         >/</kbd
       >
     {/if}
@@ -85,9 +85,9 @@
   /* The page's full size: glass plates of their own. */
   .races,
   .search {
-    background: oklch(0.18 0 0 / 0.55);
+    background: var(--glass);
     backdrop-filter: saturate(180%) blur(24px);
-    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.09);
+    box-shadow: inset 0 0 0 1px var(--glass-edge);
   }
   .races {
     padding: 0.25rem;
@@ -109,8 +109,8 @@
     top: 0.25rem;
     bottom: 0.25rem;
     border-radius: 999px;
-    background: rgb(255 255 255 / 0.12);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+    background: color-mix(in oklab, var(--foreground) 12%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent);
     transition:
       left 0.5s var(--ease-apple),
       width 0.5s var(--ease-apple);
@@ -143,13 +143,13 @@
   .compact .pill {
     top: 0;
     bottom: 0;
-    background: oklch(1 0 0 / 0.09);
+    background: color-mix(in oklab, var(--foreground) 9%, transparent);
   }
   .compact .search {
     height: 2rem;
     width: 13rem;
     font-size: 0.8rem;
-    background: oklch(1 0 0 / 0.06);
+    background: color-mix(in oklab, var(--foreground) 6%, transparent);
   }
   .compact .search :global(.search-icon) {
     width: 0.875rem;

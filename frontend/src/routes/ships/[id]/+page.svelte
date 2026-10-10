@@ -6,7 +6,9 @@
   import EveText from '$lib/components/eve-text.svelte';
   import FactionEmblem from '$lib/components/faction-emblem.svelte';
   import GameImage from '$lib/components/game-image.svelte';
-  import LiveryView from '$lib/components/livery-view.svelte';
+  import SectionStage from '$lib/components/section-stage.svelte';
+  import SkinrDesigns from '$lib/components/skinr-designs.svelte';
+  import { skinrLook } from '$lib/skinr';
   import SheetMargin from '$lib/components/sheet-margin.svelte';
   import ShipRail from '$lib/components/ship-rail.svelte';
   import SkinIcon from '$lib/components/skin-icon.svelte';
@@ -29,7 +31,14 @@
   /** The selected skin's id from `?skin=`, or null for the ship's own livery. */
   const skinId = $derived(Number(page.url.searchParams.get('skin')) || null);
   const skin = $derived(ship.skins.find((candidate) => candidate.id === skinId) ?? null);
-  const dna = $derived(skin?.dna ?? ship.dna);
+  /** The chosen player design from `?skinr=`, which replaces the livery. */
+  const skinrs = $derived(data.skinrs);
+  const skinrId = $derived(page.url.searchParams.get('skinr'));
+  const skinrDesign = $derived(skinrs.designs.find((design) => design.id === skinrId) ?? null);
+  const look = $derived(
+    skinrDesign ? skinrLook(ship.dna, skinrDesign, skinrs.components, skinrs.slot_materials) : null,
+  );
+  const dna = $derived(look?.dna ?? skin?.dna ?? ship.dna);
   const tint = $derived(raceTint(ship.race?.id));
 
   const summary = $derived<ShipSummary>({
@@ -48,7 +57,7 @@
   // the chapter effect below.
   $effect(() => {
     stage.morphId = summary.id;
-    stage.show(summary, dna);
+    stage.show(summary, dna, stage.direction, look?.pattern ?? null);
   });
 
   function selectSkin(id: number | null, scrollTop = false, direction?: 1 | -1) {
@@ -58,6 +67,7 @@
     const order = liveries.map((livery) => livery.id);
     stage.direction = direction ?? (order.indexOf(id) >= order.indexOf(skinId) ? 1 : -1);
     const url = new URL(page.url);
+    url.searchParams.delete('skinr');
     if (id === null) url.searchParams.delete('skin');
     else url.searchParams.set('skin', String(id));
     goto(url, { replaceState: true, noScroll: true, keepFocus: true });
@@ -65,11 +75,26 @@
   }
 
   /**
+   * Shows a player design; it slides in from the side it sits on in the list,
+   * or from the side an arrow key points.
+   */
+  function selectSkinr(design: { id: string }, direction?: 1 | -1) {
+    if (design.id === skinrId) return;
+    const order = skinrs.designs.map((candidate) => candidate.id);
+    const current = skinrId === null ? -1 : order.indexOf(skinrId);
+    stage.direction = direction ?? (order.indexOf(design.id) >= current ? 1 : -1);
+    const url = new URL(page.url);
+    url.searchParams.delete('skin');
+    url.searchParams.set('skinr', design.id);
+    goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+  }
+
+  /**
    * The page reads as chapters. Each one frames the ship its own way: where
    * the stage sits (beside the chapter's text on wide screens) and the camera
    * angle. The chapter crossing the middle of the screen is the active one.
    */
-  type Chapter = 'hero' | 'profile' | 'blueprint' | 'liveries' | 'more';
+  type Chapter = 'hero' | 'profile' | 'blueprint' | 'liveries' | 'skinrs' | 'more';
   const RIGHT: StagePlacement = { x: 0.2, scale: 0.8 };
   /**
    * How each chapter frames the main ship. From the blueprint on it glides
@@ -82,6 +107,7 @@
     profile: { placement: RIGHT, pose: SIDE_POSE, dim: 0 },
     blueprint: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
     liveries: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
+    skinrs: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
     more: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
   };
 
@@ -94,7 +120,9 @@
   const wide = $derived(innerWidth >= SIDE_BY_SIDE_MIN_WIDTH);
   const framing = $derived(CHAPTERS[chapter]);
   /** From the blueprint down, the main ship sits in the drawing. */
-  const docked = $derived(chapter === 'blueprint' || chapter === 'liveries' || chapter === 'more');
+  const docked = $derived(
+    chapter === 'blueprint' || chapter === 'liveries' || chapter === 'skinrs' || chapter === 'more',
+  );
   const placement = $derived(wide ? framing.placement : CENTER);
 
   /**
@@ -162,21 +190,33 @@
   }
 
   const liveries = $derived([
-    { id: null, name: 'Standard issue', colors: ship.colors, icon_url: null },
+    { id: null, name: 'Standard issue', colors: ship.colors, icon_url: null, icon_colors: null },
     ...ship.skins,
   ]);
   const liveryName = $derived(skin?.name ?? 'Standard issue');
 
-  /** Arrow keys step through the liveries like a carousel. */
+  /**
+   * Arrow keys step through a carousel, wrapping around: the player designs
+   * while their chapter is the active one, the liveries everywhere else.
+   */
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
       return;
-    const order = liveries.map((livery) => livery.id);
     const step = event.key === 'ArrowRight' ? 1 : -1;
-    const next = order[(order.indexOf(skinId) + step + order.length) % order.length];
+    const wrap = (index: number, length: number) => (index + step + length) % length;
     event.preventDefault();
-    selectSkin(next ?? null, false, step);
+    if (chapter === 'skinrs' && skinrs.designs.length) {
+      const designs = skinrs.designs;
+      // From no design yet, right starts at the first and left at the last.
+      const current = designs.findIndex((design) => design.id === skinrId);
+      const next =
+        current < 0 ? (step === 1 ? 0 : designs.length - 1) : wrap(current, designs.length);
+      selectSkinr(designs[next], step);
+      return;
+    }
+    const order = liveries.map((livery) => livery.id);
+    selectSkin(order[wrap(order.indexOf(skinId), order.length)] ?? null, false, step);
   }
 
   /**
@@ -253,6 +293,7 @@
     profile: 'profile',
     blueprint: 'blueprint',
     liveries: 'liveries',
+    skinrs: 'skinrs',
     more: 'related',
   };
 
@@ -263,6 +304,7 @@
       ...(ship.description ? [{ id: 'profile', label: 'Profile' }] : []),
       { id: 'blueprint', label: 'Blueprint' },
       ...(ship.skins.length ? [{ id: 'liveries', label: 'Liveries' }] : []),
+      ...(skinrs.designs.length ? [{ id: 'skinrs', label: 'SKINR' }] : []),
       ...(rails.length ? [{ id: 'related', label: 'Related' }] : []),
     ];
     nav.reset = () => stage.resetView?.();
@@ -346,7 +388,7 @@
         <p class="text-sm text-foreground/80">
           <kbd class="mr-2 hidden text-[0.7rem] text-muted-foreground/70 lg:inline">← →</kbd>
           <span class="text-muted-foreground">Livery</span>
-          <span class="mx-1.5 text-white/20">/</span>{liveryName}
+          <span class="mx-1.5 text-foreground/20">/</span>{liveryName}
         </p>
         <div
           class="picker glass w-[min(100%,26rem)] overflow-clip rounded-full py-2"
@@ -368,6 +410,7 @@
               >
                 <SkinIcon
                   iconUrl={livery.icon_url}
+                  iconColors={livery.icon_colors}
                   colors={livery.colors}
                   selected={skinId === livery.id}
                   class="size-8"
@@ -420,10 +463,10 @@
     {/if}
 
     <!-- The blueprint is a sheet of its own: solid blueprint paper from edge to
-         edge, set hard against the dark chapters around it. -->
+         edge, set hard against the chapters around it, and dark in either theme. -->
     <section
       id="blueprint"
-      class="min-h-dvh px-4 py-24 lg:px-10"
+      class="theme-dark min-h-dvh px-4 py-24 lg:px-10"
       use:chapterOf={'blueprint'}
       use:paperOf
     >
@@ -438,42 +481,14 @@
 
     {#if ship.skins.length}
       <section id="liveries" class="chapter relative" use:chapterOf={'liveries'}>
-        <!-- The section's own ship, at half its height beside the text, over
-             the faction emblem. Full-bleed and scrolling with the section. -->
-        <div class="livery-stage pointer-events-none absolute inset-y-0" aria-hidden="true">
-          <div
-            class="absolute inset-0"
-            style:background="radial-gradient(35% 40% at {wide ? 70 : 50}% 50%, color-mix(in oklab, {tint}
-            14%, transparent), transparent 70%)"
-          ></div>
-          <div class="livery-frame">
-            {#if ship.faction?.logo_url}
-              <!-- The emblem sits where the ship does: shifted and scaled like
-                   the stage's RIGHT placement. -->
-              <div
-                class="livery-emblem absolute inset-0"
-                class:wide
-                style:--shift="{RIGHT.x * 100}vw"
-                style:--scale={RIGHT.scale}
-              >
-                <div
-                  class="absolute top-1/2 left-1/2 size-[min(120vh,105vw)] -translate-x-1/2 -translate-y-1/2"
-                >
-                  <FactionEmblem url={ship.faction.logo_url} {tint} class="size-full" />
-                </div>
-              </div>
-            {/if}
-            <!-- The canvas spans the whole width; the renderer shifts the ship
-                 right with an off-centre lens, so a livery sliding out to the
-                 left travels under the text to the screen edge. -->
-            <LiveryView
-              pose={FRONT_POSE}
-              shift={wide ? RIGHT.x : 0}
-              scale={wide ? RIGHT.scale : 1}
-              class="absolute inset-0"
-            />
-          </div>
-        </div>
+        <SectionStage
+          key="liveries"
+          pose={FRONT_POSE}
+          {tint}
+          logoUrl={ship.faction?.logo_url ?? null}
+          {wide}
+          placement={RIGHT}
+        />
         <div class="chapter-text relative">
           <p class="reveal eyebrow mb-4" style:color={tint}>Liveries</p>
           <h2 class="reveal display mb-4 text-[clamp(2.25rem,4vw,3.5rem)]">
@@ -492,6 +507,7 @@
               >
                 <SkinIcon
                   iconUrl={livery.icon_url}
+                  iconColors={livery.icon_colors}
                   colors={livery.colors}
                   selected={skinId === livery.id}
                   class="size-14 group-hover:-translate-y-1"
@@ -507,6 +523,34 @@
               </button>
             {/each}
           </div>
+        </div>
+      </section>
+    {/if}
+
+    {#if skinrs.designs.length}
+      <section id="skinrs" class="chapter relative" use:chapterOf={'skinrs'}>
+        <SectionStage
+          key="skinrs"
+          pose={FRONT_POSE}
+          {tint}
+          logoUrl={ship.faction?.logo_url ?? null}
+          {wide}
+          placement={RIGHT}
+        />
+        <div class="chapter-text relative">
+          <p class="reveal eyebrow mb-4" style:color={tint}>SKINR</p>
+          <h2 class="reveal display mb-4 text-[clamp(2.25rem,4vw,3.5rem)]">
+            <span class="text-sheen">Made by players.</span>
+          </h2>
+          <p class="reveal mb-10 max-w-md text-muted-foreground">
+            Designs capsuleers made for the {ship.name}, on the Paragon Hub right now.
+          </p>
+          <SkinrDesigns
+            designs={skinrs.designs}
+            components={skinrs.components}
+            selected={skinrDesign}
+            onselect={selectSkinr}
+          />
         </div>
       </section>
     {/if}
@@ -541,25 +585,6 @@
 </main>
 
 <style>
-  /* The livery section's ship: a viewport-sized frame centred on the
-     section, shifted beside the text like the stage's RIGHT placement. */
-  .livery-stage {
-    left: 50%;
-    width: 100vw;
-    margin-left: -50vw;
-    overflow: clip;
-  }
-  .livery-frame {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    width: 100vw;
-    height: 100dvh;
-    transform: translateY(-50%);
-  }
-  .livery-emblem.wide {
-    transform: translateX(var(--shift)) scale(var(--scale));
-  }
   .blueprint-paper {
     background: var(--blueprint-paper);
   }

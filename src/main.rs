@@ -18,6 +18,11 @@ async fn main() {
         .await
         .expect("database migrations");
 
+    // Keeps the Paragon Hub's SKINR designs current; ESI_SYNC=0 turns it off.
+    if std::env::var("ESI_SYNC").map_or(true, |value| value != "0") {
+        skinr::esi::skinr::spawn(pool.clone(), skinr::esi::client::EsiClient::from_env());
+    }
+
     let app = skinr::server::router(skinr::server::AppState {
         pool,
         cdn: skinr::cdn::CdnClient::from_env(),

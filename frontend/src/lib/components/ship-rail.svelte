@@ -107,7 +107,7 @@
                 style:background="var(--glow)"
               ></div>
               <div
-                class="relative aspect-square overflow-hidden rounded-[1.5rem] bg-white/[0.03] shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1px_rgb(255_255_255/0.04)] transition-transform duration-500 ease-[var(--ease-apple)]"
+                class="relative aspect-square overflow-hidden rounded-[1.5rem] bg-foreground/[0.03] shadow-[0_30px_60px_-30px_var(--shadow),inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_4%,transparent)] transition-transform duration-500 ease-[var(--ease-apple)]"
               >
                 <GameImage
                   src={typeRender(other.id, 256)}
@@ -175,7 +175,7 @@
     width: 2rem;
     height: 2rem;
     border-radius: 999px;
-    color: rgb(255 255 255 / 0.85);
+    color: color-mix(in oklab, var(--foreground) 85%, transparent);
     transition:
       opacity 0.3s,
       transform 0.3s var(--ease-apple);

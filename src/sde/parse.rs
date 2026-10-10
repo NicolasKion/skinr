@@ -33,6 +33,9 @@ pub struct SdeFiles<R> {
     pub dogma_units: R,
     pub type_bonus: R,
     pub icons: R,
+    pub skinr_components: R,
+    pub skinr_component_categories: R,
+    pub skinr_slots_to_materials: R,
 }
 
 /// A localized SDE string; the viewer keeps English.
@@ -43,7 +46,7 @@ pub(super) struct Localized {
 }
 
 impl Localized {
-    fn text(self) -> String {
+    pub(super) fn text(self) -> String {
         self.en.unwrap_or_default()
     }
 }
@@ -346,7 +349,15 @@ pub fn parse<R: BufRead>(files: SdeFiles<R>) -> Result<ShipTables, Error> {
     let bonuses =
         super::dogma::ship_bonuses(&ship_ids, &type_names, files.dogma_units, files.type_bonus)?;
 
+    let (skinr_components, skinr_slot_materials) = super::skinr::parse(
+        files.skinr_components,
+        files.skinr_component_categories,
+        files.skinr_slots_to_materials,
+    )?;
+
     Ok(ShipTables {
+        skinr_components,
+        skinr_slot_materials,
         attributes,
         attribute_icons,
         bonuses,
@@ -470,6 +481,9 @@ mod tests {
             dogma_units: b"",
             type_bonus: b"",
             icons: b"",
+            skinr_components: b"",
+            skinr_component_categories: b"",
+            skinr_slots_to_materials: b"",
             factions: concat!(
                 r#"{"_key": 500001, "name": {"en": "Caldari State"}, "flatLogo": "caldari_logo"}"#,
                 "\n",

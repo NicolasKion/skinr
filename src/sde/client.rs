@@ -9,7 +9,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub const DEFAULT_BASE_URL: &str = "https://developers.eveonline.com/static-data/tranquility";
 
 /// The SDE files the ship import needs, in the order [`extract_files`] returns them.
-pub const REQUIRED_FILES: [&str; 14] = [
+pub const REQUIRED_FILES: [&str; 17] = [
     "types.jsonl",
     "groups.jsonl",
     "graphics.jsonl",
@@ -24,6 +24,9 @@ pub const REQUIRED_FILES: [&str; 14] = [
     "dogmaUnits.jsonl",
     "typeBonus.jsonl",
     "icons.jsonl",
+    "skinrComponents.jsonl",
+    "skinrComponentCategories.jsonl",
+    "skinrSlotsToMaterials.jsonl",
 ];
 
 pub struct SdeClient {

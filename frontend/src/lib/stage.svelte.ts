@@ -106,8 +106,20 @@ class Stage {
   /** Set by the stage component once the renderer exists. */
   resetView: (() => void) | null = null;
 
-  show(ship: ShipSummary, dna = ship.dna, direction: 1 | -1 = this.direction) {
+  /**
+   * A SOF pattern the DNA needs that the SOF does not ship (a SKINR design's),
+   * registered with the engine before the build.
+   */
+  pattern: { name: string; record: object } | null = null;
+
+  show(
+    ship: ShipSummary,
+    dna = ship.dna,
+    direction: 1 | -1 = this.direction,
+    pattern: { name: string; record: object } | null = null,
+  ) {
     this.direction = direction;
+    this.pattern = pattern;
     this.ship = ship;
     this.dna = dna;
   }

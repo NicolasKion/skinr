@@ -51,6 +51,13 @@ export interface Skin {
   colors: Colors;
   /** The game's icon for the skin material, when the client has one. */
   icon_url: string | null;
+  /** That icon's colors, read off it by the import, to draw it sharp as vectors. */
+  icon_colors: IconColors | null;
+}
+
+/** A skin icon's colors: its three bands and its lights. */
+export interface IconColors extends Colors {
+  lights: string;
 }
 
 /**
@@ -134,4 +141,70 @@ export interface BonusGroup {
   title: string;
   per_level: boolean;
   lines: { amount: string | null; text: RichSegment[] }[];
+}
+
+/** A SKINR component (src/server/skinr.rs): a material or a projected pattern. */
+export interface SkinrComponent {
+  id: number;
+  name: string;
+  /** `Material`, `Pattern` or `Metallic`. */
+  category: string;
+  finish: string | null;
+  /** For materials: the SOF material name DNA uses. */
+  material: string | null;
+  /** For patterns: the projection texture. */
+  texture: string | null;
+  projection_u: string | null;
+  projection_v: string | null;
+  icon_url: string | null;
+  /** For materials: a swatch color sampled from the client's icon, `#rrggbb`. */
+  color: string | null;
+}
+
+export interface SkinrVector {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** What one SKINR slot holds, exactly as ESI returns it. */
+export interface SkinrSlotConfiguration {
+  nanocoating?: { id: number };
+  pattern?: {
+    id: number;
+    configuration: {
+      /** Which of the four SKINR material slots the pattern is projected onto. */
+      projection?: Partial<Record<'slot1' | 'slot2' | 'slot3' | 'slot4', boolean>>;
+      transform?: {
+        position: SkinrVector;
+        rotation: SkinrVector & { w: number };
+        scaling: SkinrVector;
+      };
+      mirrored?: boolean;
+    };
+  };
+}
+
+/** A player-made design listed on the Paragon Hub. */
+export interface SkinrDesign {
+  id: string;
+  name: string;
+  line: string | null;
+  tier: number | null;
+  creator: { id: number; name: string | null };
+  layout: {
+    slots: { id: number; configuration: SkinrSlotConfiguration }[];
+    pattern_blend_mode?: string;
+  };
+  listings: number;
+  quantity: number;
+  min_price_plex: number | null;
+}
+
+/** `/api/ships/{id}/skinrs`. */
+export interface ShipSkinrs {
+  /** SKINR material slot (1-4) to Trinity hull material (1-4), for this hull's faction. */
+  slot_materials: Record<string, number>;
+  designs: SkinrDesign[];
+  components: Record<string, SkinrComponent>;
 }

@@ -78,6 +78,22 @@ interface CameraState {
 const HOLOGRAM_EASING = 3;
 /** How quickly the missing-resource glitch comes and goes, per second. */
 const GLITCH_EASING = 6;
+/**
+ * The light theme's lighting. A ship lit for space reads as a dark silhouette
+ * on a light page, so the sun, ambient fill and reflections are turned up (as
+ * multiples of the scene's own) and the output gamma lowered (the scene's is
+ * 1) to lift the dark plating. Neither does much alone; together they do.
+ */
+const BRIGHT_LIGHTING = { sun: 2, ambient: 2.4, reflection: 1.4, gamma: 0.7 };
+/**
+ * The sun rides with the camera, so whatever side of a ship is in view is
+ * lit: it shines from this far to the left of the camera (radians of yaw)…
+ */
+const KEY_LIGHT_YAW = -0.7;
+/** …and this far above it (radians of pitch), like a photographer's key light. */
+const KEY_LIGHT_PITCH = 0.55;
+/** How quickly the lighting moves between the two looks, per second. */
+const LIGHTING_EASING = 4;
 
 const MAX_PITCH = 1.5;
 const FIELD_OF_VIEW = Math.PI / 4;
@@ -194,16 +210,27 @@ async function crop(image: ImageData) {
 }
 
 /**
- * The livery section's view: its camera pose, whether it is on screen, and
- * where the ship sits in it. The canvas spans the whole viewport; `shift`
- * moves the ship right by that share of its width (an off-centre lens, so
- * nothing is cut off at a frame edge) and `scale` sizes it.
+ * A page section's own view of the ship (the liveries, the SKINRs): its
+ * camera pose, whether it is on screen, and where the ship sits in it. The
+ * canvas spans the whole viewport; `shift` moves the ship right by that share
+ * of its width (an off-centre lens, so nothing is cut off at a frame edge) and
+ * `scale` sizes it.
  */
-export interface LiveryView {
+export interface SectionView {
   pose: CameraPose;
   visible: boolean;
   shift: number;
   scale: number;
+}
+
+/** A section view's canvas and what the viewer has done to it. */
+interface Section {
+  canvas: HTMLCanvasElement;
+  context: any;
+  view: SectionView | null;
+  /** Where the viewer dragged the view to; null follows its pose. */
+  angles: { yaw: number; pitch: number } | null;
+  drag: { x: number; y: number } | null;
 }
 
 /** Ease-in-out with a soft landing, for the carousel glide. */
@@ -291,17 +318,28 @@ export class ShipRenderer {
   /** 0 is a clean picture, 1 the full missing-resource glitch. */
   private glitchAmount = 0;
   private glitchTarget = 0;
+  /** 0 is the scene's own lighting, 1 the light theme's (BRIGHT_LIGHTING). */
+  private lightingAmount = 0;
+  private lightingTarget = 0;
+  /** The scene's own sun, ambient and reflection strength, scaled from. */
+  private baseLighting: {
+    sun: number[];
+    dynamicSun: number[];
+    ambient: number[];
+    reflection: number;
+  } | null = null;
   /** Called for every resource read that fails, with its res:/ path. */
   onMissing: ((path: string, error: Error) => void) | null = null;
   /**
-   * The livery section's own view: a second canvas showing the ship from its
-   * own pose with the normal render, drawn by rendering the scene a second
-   * time each frame and copying the result over on the GPU. It lets the main
-   * camera stay on the blueprint while the liveries are on screen.
+   * Page sections' own views, by name: further canvases showing the ship from
+   * their own pose with the normal render, drawn by rendering the scene again
+   * each frame and copying the result over on the GPU. They let the main
+   * camera stay on the blueprint while the liveries or SKINRs are on screen.
    */
-  readonly liveryCanvas = document.createElement('canvas');
-  private liveryContext: any = null;
-  private liveryView: LiveryView | null = null;
+  private sections = new Map<string, Section>();
+  /** The WebGPU device and canvas format, for configuring section canvases. */
+  private gpuDevice: any = null;
+  private canvasFormat = '';
   /** The camera's field of view; blueprint captures narrow it for a moment. */
   private fov = FIELD_OF_VIEW;
   /**
@@ -312,11 +350,8 @@ export class ShipRenderer {
   private blueprintAmount = 0;
   /** How far right of centre the camera's lens is shifted, as a share of the canvas width. */
   private lensShift = 0;
-  /** The livery view's own idle spin, for a pose without a yaw. */
-  private liveryYaw = 0;
-  /** Where the viewer dragged the livery view to; null follows its pose. */
-  private liveryAngles: { yaw: number; pitch: number } | null = null;
-  private liveryDrag: { x: number; y: number } | null = null;
+  /** The section views' own idle spin, for a pose without a yaw. */
+  private sectionYaw = 0;
   private blueprintTarget = 0;
   private blueprintHalfHeight = 0;
   private target = [0, 0, 0];
@@ -338,16 +373,27 @@ export class ShipRenderer {
   } | null = null;
   /** Whether the queue is working through slides. */
   private sliding = false;
-  /** The running glide, if any: the camera target moves from one ship to the next. */
+  /**
+   * The running glide, if any. The ships move, not the camera, and along the
+   * screen's right of whichever view draws them (`placeSlide`), so each view
+   * sees the new ship come in from the side it should, however it is turned.
+   */
   private slide: {
-    from: number[];
-    to: number[];
+    /** The incoming ship's position: beside the target while it loads, then gliding in. */
+    incoming: number[];
+    /** Where the incoming ship lands: its visual centre on the target. */
+    landing: number[];
+    /** The outgoing ship's position, gliding out the other way. */
+    outgoing: number[];
+    spacing: number;
+    /** How much further the outgoing ship travels, so it leaves the frame. */
+    push: number;
+    direction: 1 | -1;
     fromDistance: number;
     toDistance: number;
-    /** The outgoing ship's position, moved outward along `push` as the glide runs. */
-    outgoing: number[];
-    push: number[];
-    start: number;
+    /** When the glide started; null while the incoming ship still loads. */
+    start: number | null;
+    eased: number;
     resolve: () => void;
   } | null = null;
   private slideDone: Promise<void> = Promise.resolve();
@@ -410,13 +456,8 @@ export class ShipRenderer {
     // The format is chosen when the canvas is first configured.
     backBuffer.Configure({ width: 1, height: 1 });
     this.hologram = new Hologram(webgpu.GetDevice(), this.canvas, backBuffer.GetFormat());
-    this.liveryContext = this.liveryCanvas.getContext('webgpu');
-    this.liveryContext?.configure({
-      device: webgpu.GetDevice(),
-      format: backBuffer.GetFormat(),
-      alphaMode: 'premultiplied',
-      usage: gpuUsage.GPUTextureUsage.COPY_DST | gpuUsage.GPUTextureUsage.RENDER_ATTACHMENT,
-    });
+    this.gpuDevice = webgpu.GetDevice();
+    this.canvasFormat = backBuffer.GetFormat();
     this.al = new CjsWebgpuRenderContextAL({ webgpu, renderTarget: backBuffer });
     Tr2RenderContext_GetMainThreadRenderContext().SetRenderContextAL(this.al);
 
@@ -426,6 +467,15 @@ export class ShipRenderer {
     }
 
     this.scene = await loadScene(DEFAULT_SCENE);
+    // The scene's sun ball would put the sun back where the system has it
+    // every update; the camera places it instead (updateCamera).
+    this.scene.sunBall = null;
+    this.baseLighting = {
+      sun: [...this.scene.sunDiffuseColor],
+      dynamicSun: [...this.scene.sunDiffuseColorWithDynamicLights],
+      ambient: [...this.scene.ambientColor],
+      reflection: this.scene.reflectionIntensity,
+    };
     this.view = new TriView();
     this.projection = new TriProjection();
 
@@ -529,12 +579,12 @@ export class ShipRenderer {
     const fromDistance = this.distance;
     const toDistance = Math.max(10, radius * FRAMING_RADII);
 
-    // The camera the viewer watches the carousel through: the livery view
-    // while it shows, else the main one.
-    const livery = this.liveryView?.visible ? this.liveryView : null;
-    const yaw = livery ? this.liveryCamera(livery.pose).yaw : this.yaw;
-    const zoom = livery ? (livery.pose.zoom ?? 1) / livery.scale : 1;
-    const shift = livery?.shift ?? 0;
+    // The camera whose framing spaces the ships: a section view while one
+    // shows, else the main one. (Which way they glide is up to each view.)
+    const watching =
+      [...this.sections.values()].find((candidate) => candidate.view?.visible)?.view ?? null;
+    const zoom = watching ? (watching.pose.zoom ?? 1) / watching.scale : 1;
+    const shift = watching?.shift ?? 0;
 
     // Spaced by what the camera can see, not by ship size alone: a big hull
     // is framed from further back, where the view is wider. With the ship
@@ -554,38 +604,39 @@ export class ShipRenderer {
       reach(toDistance, direction === 1 ? -1 : 1) + this.shipRadius * EDGE_MARGIN - spacing,
     );
 
-    const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
-    // Where the incoming ship's visual centre goes: beside the point the
-    // camera looks at now. Its bounding-sphere centre sits off its origin
-    // (usually along its length), so the origin is placed to cancel that out;
-    // otherwise the spin would push one side's ship further into view.
-    const destination = this.target.map((value, axis) => value + right[axis] * spacing * direction);
-    const offset = destination.map((value, axis) => value - center[axis]);
-
+    // The incoming ship's origin is placed so its visual centre lands on the
+    // target: its bounding-sphere centre sits off its origin (usually along
+    // its length), and otherwise the spin would push one side's ship further
+    // into view. It waits beside the target, out of frame, while it loads.
+    const landing = this.target.map((value, axis) => value - center[axis]);
     const incoming = CjsSchema.from('EveShip2', values);
-    incoming.translationCurve = placement(offset);
+    incoming.translationCurve = placement([...landing]);
     this.scene.objects.push(incoming);
+    this.slideDone = new Promise<void>((resolve) => {
+      this.slide = {
+        incoming: incoming.translationCurve.position,
+        landing,
+        outgoing: this.ship.translationCurve?.position ?? [0, 0, 0],
+        spacing,
+        push,
+        direction,
+        fromDistance,
+        toDistance,
+        start: null,
+        eased: 0,
+        resolve,
+      };
+    });
 
     if (!(await this.waitForResources(token))) {
+      if (token === this.slideToken) this.slide = null;
       this.removeObject(incoming);
       return false;
     }
 
-    // Glide: the target moves to the incoming ship and the frame re-fits it,
-    // while the outgoing ship drifts the other way.
-    const outgoing = this.ship.translationCurve?.position ?? [0, 0, 0];
-    this.slideDone = new Promise<void>((resolve) => {
-      this.slide = {
-        from: [...this.target],
-        to: destination,
-        fromDistance,
-        toDistance,
-        outgoing,
-        push: right.map((axis) => -axis * push * direction),
-        start: performance.now(),
-        resolve,
-      };
-    });
+    // Glide: the incoming ship moves onto the target and the frame re-fits
+    // it, while the outgoing ship drifts out the other way.
+    if (this.slide) this.slide.start = performance.now();
     await this.slideDone;
     if (token !== this.slideToken) {
       // Cut short by a new ship; that ship replaced everything already.
@@ -601,6 +652,41 @@ export class ShipRenderer {
     incoming.translationCurve = placement([0, 0, 0]);
     this.target = [...center];
     return true;
+  }
+
+  /**
+   * Places the gliding ships for a view looking from `yaw`: the incoming one
+   * comes in from that view's screen side, the outgoing one leaves the other
+   * way, whatever angle the view is dragged to.
+   */
+  private placeSlide(yaw: number) {
+    const slide = this.slide;
+    if (!slide) return;
+    const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
+    const { eased, direction, spacing, push, landing, incoming, outgoing } = slide;
+    for (let axis = 0; axis < 3; axis++) {
+      incoming[axis] = landing[axis] + right[axis] * spacing * direction * (1 - eased);
+      outgoing[axis] = -right[axis] * (spacing + push) * direction * eased;
+    }
+  }
+
+  /**
+   * While the incoming ship loads, draws it once in view, on its landing
+   * spot, in a pass the frame's real renders then paint over. The runtime
+   * only requests a ship's textures and translates its shader permutations
+   * (synchronously) when it first draws it, and out of frame it is never
+   * drawn: without this, a look the scene has not drawn before (a SKINR
+   * pattern) would load and compile mid-glide, stalling the glide and
+   * popping in. This way the wait for resources covers it, while nothing
+   * on screen moves.
+   */
+  private warmIncoming() {
+    const slide = this.slide;
+    if (!slide || slide.start !== null) return;
+    for (let axis = 0; axis < 3; axis++) slide.incoming[axis] = slide.landing[axis];
+    this.updateCamera();
+    blue.os.PumpOS();
+    this.placeSlide(this.yaw);
   }
 
   private removeObject(object: any) {
@@ -724,28 +810,49 @@ export class ShipRenderer {
   }
 
   /**
-   * Shows the ship in the blueprint's canvas, framed so the canvas spans the
-   * hull's length (`halfLength` either side of its centre) and `halfHeight`
-   * above and below; null stops it. Only rendered while `visible`.
+   * The canvas of the section view `key`, created on first use. The page puts
+   * it in its section; the renderer draws into it while the view is visible.
    */
-  /** Shows the livery view from `pose` while `visible`, or stops it with null. */
-  setLiveryView(view: LiveryView | null) {
-    this.liveryView = view;
+  sectionCanvas(key: string): HTMLCanvasElement {
+    return this.section(key).canvas;
   }
 
-  /** The livery view's camera angles: dragged, or its pose (spinning without a yaw). */
-  private liveryCamera(pose: CameraPose) {
-    return this.liveryAngles ?? { yaw: pose.yaw ?? this.liveryYaw, pitch: pose.pitch };
+  /** Shows the section view `key` from its pose while `visible`, or stops it with null. */
+  setSectionView(key: string, view: SectionView | null) {
+    this.section(key).view = view;
   }
 
-  /** Renders the livery view into the main canvas and copies it to its own canvas. */
-  private renderLiveryView(view: LiveryView, time: number) {
+  private section(key: string): Section {
+    let section = this.sections.get(key);
+    if (!section) {
+      const canvas = document.createElement('canvas');
+      const context: any = canvas.getContext('webgpu');
+      context?.configure({
+        device: this.gpuDevice,
+        format: this.canvasFormat,
+        alphaMode: 'premultiplied',
+        usage: gpuUsage.GPUTextureUsage.COPY_DST | gpuUsage.GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+      section = { canvas, context, view: null, angles: null, drag: null };
+      this.sections.set(key, section);
+      this.bindSectionInput(section);
+    }
+    return section;
+  }
+
+  /** A section view's camera angles: dragged, or its pose (spinning without a yaw). */
+  private sectionCamera(section: Section, pose: CameraPose) {
+    return section.angles ?? { yaw: pose.yaw ?? this.sectionYaw, pitch: pose.pitch };
+  }
+
+  /** Renders a section view into the main canvas and copies it to the section's canvas. */
+  private renderSectionView(section: Section, view: SectionView, time: number) {
     const { pose } = view;
-    if (!this.hologram || !this.liveryContext) return;
+    if (!this.hologram || !section.context) return;
     const { width, height } = this.canvas;
-    if (this.liveryCanvas.width !== width || this.liveryCanvas.height !== height) {
-      this.liveryCanvas.width = width;
-      this.liveryCanvas.height = height;
+    if (section.canvas.width !== width || section.canvas.height !== height) {
+      section.canvas.width = width;
+      section.canvas.height = height;
     }
     const saved = {
       yaw: this.yaw,
@@ -755,15 +862,16 @@ export class ShipRenderer {
       lensShift: this.lensShift,
     };
     try {
-      ({ yaw: this.yaw, pitch: this.pitch } = this.liveryCamera(pose));
+      ({ yaw: this.yaw, pitch: this.pitch } = this.sectionCamera(section, pose));
       // A smaller ship is the same ship seen from further back.
       this.zoom = (pose.zoom ?? 1) / view.scale;
       this.lensShift = view.shift;
       this.blueprintAmount = 0;
+      this.placeSlide(this.yaw);
       this.updateCamera();
       blue.os.PumpOS();
       if (this.glitchAmount > 0) this.hologram.apply(0, time / 1000, this.glitchAmount);
-      this.hologram.copyTo(this.liveryContext, { x: 0, y: 0, width, height });
+      this.hologram.copyTo(section.context, { x: 0, y: 0, width, height });
     } finally {
       Object.assign(this, saved);
     }
@@ -783,6 +891,29 @@ export class ShipRenderer {
   /** Glitches the picture (1) for a ship with missing resources, or clears it (0). */
   setGlitch(amount: number) {
     this.glitchTarget = Math.min(1, Math.max(0, amount));
+  }
+
+  /** Eases toward the light theme's brighter look (1) or the scene's own (0). */
+  setLighting(amount: number) {
+    this.lightingTarget = Math.min(1, Math.max(0, amount));
+  }
+
+  /** Writes the lighting for the current amount into the scene. */
+  private applyLighting() {
+    const base = this.baseLighting;
+    if (!base) return;
+    const scale = (bright: number) => 1 + (bright - 1) * this.lightingAmount;
+    // Color channels only; alpha stays as the scene has it. The scene lights
+    // with either sun color, depending on dynamic lighting.
+    for (let channel = 0; channel < 3; channel++) {
+      this.scene.sunDiffuseColor[channel] = base.sun[channel] * scale(BRIGHT_LIGHTING.sun);
+      this.scene.sunDiffuseColorWithDynamicLights[channel] =
+        base.dynamicSun[channel] * scale(BRIGHT_LIGHTING.sun);
+      this.scene.ambientColor[channel] = base.ambient[channel] * scale(BRIGHT_LIGHTING.ambient);
+    }
+    this.scene.reflectionIntensity = base.reflection * scale(BRIGHT_LIGHTING.reflection);
+    // A runtime setting rather than a scene property: every scene draws with it.
+    (EveSpaceScene as any).eveSpaceSceneGammaBrightness = scale(BRIGHT_LIGHTING.gamma);
   }
 
   /** Fades toward the fitting window hologram (1) or the normal render (0). */
@@ -839,18 +970,20 @@ export class ShipRenderer {
     const seconds = this.lastFrame ? (time - this.lastFrame) / 1000 : 0;
     this.lastFrame = time;
     // Nothing to draw while neither canvas is on a page.
-    if (!this.canvas.isConnected && !this.liveryCanvas.isConnected) return;
+    const connected = [...this.sections.values()].some((section) => section.canvas.isConnected);
+    if (!this.canvas.isConnected && !connected) return;
     if (this.spinning) this.yaw += seconds * IDLE_SPIN;
-    this.liveryYaw += seconds * IDLE_SPIN;
-    if (this.slide) {
+    this.sectionYaw += seconds * IDLE_SPIN;
+    if (this.slide?.start != null) {
       const progress = Math.min(1, (time - this.slide.start) / SLIDE_DURATION);
       const eased = glide(progress);
-      const { from, to, fromDistance, toDistance, outgoing, push } = this.slide;
-      this.target = from.map((value, axis) => value + (to[axis] - value) * eased);
+      const { fromDistance, toDistance } = this.slide;
+      this.slide.eased = eased;
       // The zoom follows the glide exactly, so the frame is final when it ends.
       this.distance = this.restDistance = fromDistance + (toDistance - fromDistance) * eased;
-      for (let axis = 0; axis < 3; axis++) outgoing[axis] = push[axis] * eased;
       if (progress >= 1) {
+        // Land exactly; the swap that follows keeps this picture.
+        this.placeSlide(this.yaw);
         const { resolve } = this.slide;
         this.slide = null;
         resolve();
@@ -883,9 +1016,20 @@ export class ShipRenderer {
     if (Math.abs(this.glitchTarget - this.glitchAmount) < 1e-3) {
       this.glitchAmount = this.glitchTarget;
     }
+    if (this.lightingAmount !== this.lightingTarget) {
+      this.lightingAmount +=
+        (this.lightingTarget - this.lightingAmount) * (1 - Math.exp(-seconds * LIGHTING_EASING));
+      if (Math.abs(this.lightingTarget - this.lightingAmount) < 1e-3) {
+        this.lightingAmount = this.lightingTarget;
+      }
+      this.applyLighting();
+    }
     try {
-      const view = this.liveryView;
-      if (view?.visible && this.ship) this.renderLiveryView(view, time);
+      this.warmIncoming();
+      for (const section of this.sections.values()) {
+        if (section.view?.visible && this.ship) this.renderSectionView(section, section.view, time);
+      }
+      this.placeSlide(this.yaw);
       this.updateCamera();
       blue.os.PumpOS();
       if (this.hologramAmount > 0 || this.glitchAmount > 0) {
@@ -950,7 +1094,6 @@ export class ShipRenderer {
       );
       this.drag = { x: event.clientX, y: event.clientY };
     });
-    this.bindLiveryInput();
     canvas.addEventListener(
       'wheel',
       (event) => {
@@ -964,29 +1107,29 @@ export class ShipRenderer {
   }
 
   /**
-   * Dragging the livery view orbits its own camera; the main camera, docked
-   * in the blueprint, stays put. Vertical swipes still scroll the page.
+   * Dragging a section view orbits its own camera; the main camera, docked in
+   * the blueprint, stays put. Vertical swipes still scroll the page.
    */
-  private bindLiveryInput() {
-    const canvas = this.liveryCanvas;
+  private bindSectionInput(section: Section) {
+    const { canvas } = section;
     canvas.style.touchAction = 'pan-y';
     canvas.addEventListener('pointerdown', (event) => {
-      if (!this.liveryView) return;
-      this.liveryAngles = this.liveryCamera(this.liveryView.pose);
-      this.liveryDrag = { x: event.clientX, y: event.clientY };
+      if (!section.view) return;
+      section.angles = this.sectionCamera(section, section.view.pose);
+      section.drag = { x: event.clientX, y: event.clientY };
       canvas.setPointerCapture(event.pointerId);
     });
-    canvas.addEventListener('pointerup', () => (this.liveryDrag = null));
-    canvas.addEventListener('pointercancel', () => (this.liveryDrag = null));
+    canvas.addEventListener('pointerup', () => (section.drag = null));
+    canvas.addEventListener('pointercancel', () => (section.drag = null));
     canvas.addEventListener('pointermove', (event) => {
-      const angles = this.liveryAngles;
-      if (!this.liveryDrag || !angles) return;
-      angles.yaw -= (event.clientX - this.liveryDrag.x) * ORBIT_SPEED;
+      const { angles, drag } = section;
+      if (!drag || !angles) return;
+      angles.yaw -= (event.clientX - drag.x) * ORBIT_SPEED;
       angles.pitch = Math.min(
         MAX_PITCH,
-        Math.max(-MAX_PITCH, angles.pitch + (event.clientY - this.liveryDrag.y) * ORBIT_SPEED),
+        Math.max(-MAX_PITCH, angles.pitch + (event.clientY - drag.y) * ORBIT_SPEED),
       );
-      this.liveryDrag = { x: event.clientX, y: event.clientY };
+      section.drag = { x: event.clientX, y: event.clientY };
     });
   }
 
@@ -1004,6 +1147,17 @@ export class ShipRenderer {
     this.device.width = width;
     this.device.height = height;
     this.device.InitD3DDevice();
+  }
+
+  /** Points the sun the way the camera looks, from KEY_LIGHT_YAW/PITCH off it. */
+  private placeSun() {
+    const yaw = this.yaw + KEY_LIGHT_YAW;
+    const pitch = Math.min(Math.PI / 2 - 0.01, this.pitch + KEY_LIGHT_PITCH);
+    const c = Math.cos(pitch);
+    // sunDirection is the way the light travels: from the light toward the ship.
+    this.scene.sunDirection[0] = -c * Math.sin(yaw);
+    this.scene.sunDirection[1] = -Math.sin(pitch);
+    this.scene.sunDirection[2] = -c * Math.cos(yaw);
   }
 
   private updateCamera() {
@@ -1028,6 +1182,7 @@ export class ShipRenderer {
       -Math.sin(this.pitch) * Math.cos(this.yaw),
     ];
     this.view.SetLookAtPosition(eye, this.target, up);
+    this.placeSun();
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const near = Math.max(0.1, distance / 100);
     const far = distance * 20;

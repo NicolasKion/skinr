@@ -9,7 +9,8 @@ pub async fn seed(pool: &PgPool, tables: &ShipTables) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "truncate ship_attributes, ship_bonuses, ship_skins, ships, ship_groups, meta_groups, races, factions",
+        "truncate ship_attributes, ship_bonuses, ship_skins, ships, ship_groups, meta_groups, races, factions,
+            skinr_components, skinr_slot_materials",
     )
         .execute(&mut *tx)
         .await?;
@@ -132,6 +133,36 @@ pub async fn seed(pool: &PgPool, tables: &ShipTables) -> sqlx::Result<()> {
         .await?;
     }
 
+    for component in &tables.skinr_components {
+        sqlx::query(
+            "insert into skinr_components (id, name, category, finish, rarity, resource_file,
+                icon_file, projection_u, projection_v)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(component.id)
+        .bind(&component.name)
+        .bind(&component.category)
+        .bind(&component.finish)
+        .bind(component.rarity)
+        .bind(&component.resource_file)
+        .bind(&component.icon_file)
+        .bind(&component.projection_u)
+        .bind(&component.projection_v)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for slot in &tables.skinr_slot_materials {
+        sqlx::query(
+            "insert into skinr_slot_materials (faction_id, slot_id, material_id) values ($1, $2, $3)",
+        )
+        .bind(slot.faction_id)
+        .bind(slot.slot_id)
+        .bind(slot.material_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     tx.commit().await
 }
 
@@ -164,6 +195,48 @@ pub async fn store_skin_icon_layers(pool: &PgPool, layers: &[(&str, Vec<u8>)]) -
         .bind(png)
         .execute(pool)
         .await?;
+    }
+    Ok(())
+}
+
+pub async fn store_skinr_component_icons(
+    pool: &PgPool,
+    icons: &[(i32, Vec<u8>)],
+) -> sqlx::Result<()> {
+    for (component_id, png) in icons {
+        sqlx::query(
+            "insert into skinr_component_icons (component_id, png) values ($1, $2)
+             on conflict (component_id) do update set png = excluded.png",
+        )
+        .bind(component_id)
+        .bind(png)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
+pub async fn store_skin_icon_colors(pool: &PgPool, colors: &[(i32, String)]) -> sqlx::Result<()> {
+    for (material_id, colors) in colors {
+        sqlx::query("update skin_icons set colors = $2 where material_id = $1")
+            .bind(material_id)
+            .bind(colors)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+pub async fn store_skinr_component_colors(
+    pool: &PgPool,
+    colors: &[(i32, String)],
+) -> sqlx::Result<()> {
+    for (component_id, color) in colors {
+        sqlx::query("update skinr_components set color = $2 where id = $1")
+            .bind(component_id)
+            .bind(color)
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }

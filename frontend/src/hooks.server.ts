@@ -1,5 +1,14 @@
-import type { HandleFetch } from '@sveltejs/kit';
+import type { Handle, HandleFetch } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { THEME_COOKIE, parseTheme } from '$lib/theme';
+
+// The page renders in the visitor's theme (a class on <html>, app.html).
+export const handle: Handle = ({ event, resolve }) => {
+  const theme = parseTheme(event.cookies.get(THEME_COOKIE));
+  return resolve(event, {
+    transformPageChunk: ({ html }) => html.replace('%theme%', theme),
+  });
+};
 
 // Server-side loads reach Axum directly; the browser goes through the
 // shared-origin proxy instead.

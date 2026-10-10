@@ -2,10 +2,12 @@
   // The site bar: one glass capsule floating at the top of every page. The
   // logo and a breadcrumb on the left (Ships, then the page's own title); on
   // the right the page's sections, with a pill sliding under the one in
-  // view, and its reset button. The bar never changes shape while scrolling.
-  import { ChevronRight, RotateCcw } from '@lucide/svelte';
+  // view, and its reset button; last the theme switch. The bar never changes
+  // shape while scrolling.
+  import { ChevronRight, Moon, RotateCcw, Sun } from '@lucide/svelte';
   import Logo from '$lib/components/logo.svelte';
   import { nav } from '$lib/nav.svelte';
+  import { theme } from '$lib/theme.svelte';
 
   let links = $state<Record<string, HTMLAnchorElement>>({});
   const pill = $derived.by(() => {
@@ -71,7 +73,7 @@
             </a>
           {/each}
         </div>
-        <span class="mx-2 hidden h-5 w-px bg-white/10 lg:block"></span>
+        <span class="mx-2 hidden h-5 w-px bg-foreground/10 lg:block"></span>
       {/if}
 
       {#if nav.reset}
@@ -91,6 +93,19 @@
       >
         CarbonEngineJS
       </a>
+      <button
+        type="button"
+        class="icon-button"
+        title={theme.current === 'dark' ? 'Light mode' : 'Dark mode'}
+        aria-label={theme.current === 'dark' ? 'Light mode' : 'Dark mode'}
+        onclick={() => theme.toggle()}
+      >
+        {#if theme.current === 'dark'}
+          <Sun class="size-4" />
+        {:else}
+          <Moon class="size-4" />
+        {/if}
+      </button>
     </div>
   </nav>
 </header>
@@ -107,11 +122,11 @@
     pointer-events: none;
   }
   .bar {
-    background: oklch(0.15 0 0 / 0.66);
+    background: var(--glass-strong);
     backdrop-filter: saturate(160%) blur(28px);
     box-shadow:
-      inset 0 0 0 1px oklch(1 0 0 / 0.08),
-      0 12px 40px -12px rgb(0 0 0 / 0.7);
+      inset 0 0 0 1px var(--glass-edge),
+      0 12px 40px -12px var(--shadow);
   }
   .center {
     opacity: 0;
@@ -146,7 +161,7 @@
     height: 2rem;
     translate: 0 -50%;
     border-radius: 999px;
-    background: oklch(1 0 0 / 0.09);
+    background: color-mix(in oklab, var(--foreground) 9%, transparent);
     transition:
       left 0.45s var(--ease-apple),
       width 0.45s var(--ease-apple);
@@ -164,6 +179,6 @@
   }
   .icon-button:hover {
     color: var(--foreground);
-    background: oklch(1 0 0 / 0.08);
+    background: color-mix(in oklab, var(--foreground) 8%, transparent);
   }
 </style>
