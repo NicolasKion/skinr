@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/NicolasKion/skinr/actions/workflows/ci.yml/badge.svg)](https://github.com/NicolasKion/skinr/actions/workflows/ci.yml)
 [![Release](https://github.com/NicolasKion/skinr/actions/workflows/release.yml/badge.svg)](https://github.com/NicolasKion/skinr/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-Axum-DEA584?logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-Svelte%205-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev/docs/kit)
 [![WebGPU](https://img.shields.io/badge/WebGPU-CarbonEngineJS-005A9C)](https://github.com/carbonenginejs/runtime)
@@ -108,3 +109,8 @@ post-processing yet.
 
 EVE Online and all related assets are the property of CCP hf. This project is not
 affiliated with or endorsed by CCP.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The EVE Online assets the app loads at runtime
+are not covered by it.
