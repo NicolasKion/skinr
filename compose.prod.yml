@@ -44,8 +44,6 @@ services:
       - default
       - coolify
     restart: "no"
-    # A one-shot job: Coolify should not wait for it to stay up.
-    exclude_from_hc: true
     logging: *logging
 
   skinr-api:
