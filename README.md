@@ -11,6 +11,11 @@ Try on EVE Online ship skins on the real hull in 3D, right in the browser:
 the in-game ones and the SKINR designs capsuleers have up for sale on the
 Paragon Hub.
 
+> [!NOTE]
+> This is a rough first version and mostly vibe coded. It works, but it is
+> an experiment, not a finished product: expect rough edges, missing
+> pieces and things that change or break.
+
 ## Features
 
 - Every ship in the game, grouped by class and by who builds it (the empires
