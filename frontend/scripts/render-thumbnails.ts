@@ -96,6 +96,7 @@ async function renderShips(ships: [string, string][]) {
   const { RegisterObjectResources } = await import('@carbonenginejs/runtime/resource/object');
   const { CjsWebgpuFormat } = await import('@carbonenginejs/runtime/resource/formats/webgpu');
   const { CjsPngFormat } = await import('@carbonenginejs/runtime/resource/formats/png');
+  const { ImageIO } = await import('@carbonenginejs/runtime/resource/imageio');
   const { SetEffectPathDefaults } = await import('@carbonenginejs/runtime/utils');
   const { CjsSchema } = await import('@carbonenginejs/runtime/schema');
   await import('@carbonenginejs/runtime/trinity');
@@ -112,6 +113,7 @@ async function renderShips(ships: [string, string][]) {
   const { CjsFileIndexLibrary } = await import('@carbonenginejs/runtime/tools/fileindex');
   const { EveSOF } = await import('@carbonenginejs/runtime/sof');
   const { encodePng } = await import('../src/lib/viewer/png.ts');
+  const { placement } = await import('../src/lib/viewer/placement.ts');
   const { alignBlockTextures } = await import('../src/lib/viewer/block-align.ts');
   const { STUDIO_LOOK, applyLighting, placeSun, takeLighting } =
     await import('../src/lib/viewer/lighting.ts');
@@ -199,6 +201,7 @@ async function renderShips(ships: [string, string][]) {
     formats: [CjsPngFormat],
     useWorkerLoading: false,
   });
+  ImageIO.registerImageHandler(CjsPngFormat);
   resource.RegisterGeometryResources(blue.resMan);
   resource.RegisterTextureResources(blue.resMan);
   resource.RegisterTextureArray(blue.resMan);
@@ -374,10 +377,7 @@ async function renderShips(ships: [string, string][]) {
     gpuErrors = [];
     const values = await sof.BuildValuesFromDNAAsync(dna);
     const ship = CjsSchema.from('EveShip2', values);
-    ship.translationCurve = {
-      position: [0, 0, 0],
-      GetValueAt: (_time: number, position: Float32Array) => position.fill(0, 0, 3),
-    };
+    ship.translationCurve = placement([0, 0, 0]);
     scene.objects.push(ship);
     try {
       // The whole bounding sphere in view, whatever the ship's shape.

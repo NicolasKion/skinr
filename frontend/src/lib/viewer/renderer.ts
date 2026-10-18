@@ -13,6 +13,7 @@ import {
 import { RegisterObjectResources } from '@carbonenginejs/runtime/resource/object';
 import { CjsWebgpuFormat } from '@carbonenginejs/runtime/resource/formats/webgpu';
 import { CjsPngFormat } from '@carbonenginejs/runtime/resource/formats/png';
+import { ImageIO } from '@carbonenginejs/runtime/resource/imageio';
 import { SetEffectPathDefaults } from '@carbonenginejs/runtime/utils';
 import { CjsSchema } from '@carbonenginejs/runtime/schema';
 import '@carbonenginejs/runtime/trinity';
@@ -30,6 +31,7 @@ import { EveSpaceSceneRenderDriver } from '@carbonenginejs/runtime/trinity';
 import { CjsWebgpuDevice } from '@carbonenginejs/runtime/trinityal/webgpu';
 import { CjsWebgpuRenderContextAL, CjsWebgpuRenderTarget } from 'cjs-webgpu-internal';
 
+import { placement } from './placement';
 import { readBytes, type FileIndexLibrary } from './resources';
 import {
   FIELD_OF_VIEW,
@@ -156,19 +158,6 @@ export interface Blueprint {
 
 /** Canvas pixels per CSS pixel, capped to keep 4K screens affordable. */
 const MAX_PIXEL_RATIO = 2;
-
-/** A fixed world position in the shape space objects read their translation curve in. */
-function placement(position: number[]) {
-  return {
-    position,
-    GetValueAt(_time: number, out: number[]) {
-      out[0] = position[0];
-      out[1] = position[1];
-      out[2] = position[2];
-      return out;
-    },
-  };
-}
 
 /** The box around a captured frame's pixels more opaque than `solid`, or null when there are none. */
 function hullBounds(image: ImageData, solid: number) {
@@ -441,6 +430,9 @@ export class ShipRenderer {
       formats: [CjsPngFormat],
       useWorkerLoading: false,
     });
+    // Image decoding has its own registry since alpha.11, and Register's
+    // formats do not reach it.
+    ImageIO.registerImageHandler(CjsPngFormat);
     RegisterGeometryResources(blue.resMan);
     RegisterTextureResources(blue.resMan);
     // Composite textures some hulls reference as dynamic:/ paths (the Amarr
