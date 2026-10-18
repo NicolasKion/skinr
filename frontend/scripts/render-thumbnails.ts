@@ -118,19 +118,12 @@ async function renderShips(ships: [string, string][]) {
   const looks = LOOKS_OVERRIDE
     ? JSON.parse(LOOKS_OVERRIDE)
     : { dark: STUDIO_LOOK, light: STUDIO_LOOK };
-  const { FIELD_OF_VIEW, THUMBNAIL_POSE } = await import('../src/lib/viewer/poses.ts');
+  const { FIELD_OF_VIEW, THUMBNAIL_FRAMING, THUMBNAIL_POSE } =
+    await import('../src/lib/viewer/poses.ts');
 
   /** The site's universe scene: sun, ambient and reflection maps. */
   const SCENE = 'res:/dx9/scene/universe/c01_cube.red';
-  /**
-   * The first look takes the bounding sphere with this much room (spheres
-   * are loose, so this only has to keep the hull in frame)…
-   */
-  const MARGIN = 1.25;
-  /** …then the view closes in on the hull's own pixels, leaving this much room. */
-  const PADDING = 1.06;
-  /** Pixels at least this opaque count as hull when measuring it. */
-  const SOLID = 8;
+  const { margin: MARGIN, padding: PADDING, solid: SOLID } = THUMBNAIL_FRAMING;
   /** Frames the resource manager must stay idle before a picture counts. */
   const QUIET_FRAMES = 10;
   /** Gives up on a ship that is still loading after this many frames. */

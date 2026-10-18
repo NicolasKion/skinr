@@ -5,8 +5,9 @@
   // slot marked here (use:dockTarget) and keeps rendering as a hologram. The
   // plan below it and the front beside it are captured drawings at the same
   // scale, centred on the same axis. Once `built` (the ship is on its way in)
-  // the rest of the sheet constructs itself around it. Under the front view,
-  // D seals the drawing with the faction that builds the ship.
+  // the rest of the sheet constructs itself around it. Section 05 names the
+  // faction that builds the ship; it stays out of the drawing so a slim hull's
+  // front view keeps its own width.
   import BonusList from '$lib/components/bonus-list.svelte';
   import DrawnZone from '$lib/components/drawn-zone.svelte';
   import DefenseTable from '$lib/components/defense-table.svelte';
@@ -38,8 +39,6 @@
   const CSS_PIXEL_METRES = 0.0254 / 96;
   /** The sheet starts constructing once the ship is most of the way into its slot. */
   const BUILD_START = TRANSITION_MS * 0.6;
-  /** The faction seal's width (D, under the front view), in CSS pixels. */
-  const SEAL_WIDTH = 304;
   /** How far apart the zones start drawing their frames, in ms. */
   const ZONE_STAGGER = 180;
 
@@ -61,12 +60,10 @@
     const height = drawing.halfHeight * 2 + (top?.height ?? 0) * mpp;
     if (!length || !height) return 0;
     const room = areaWidth - GAP * 2;
-    // The right column is the front view, but never narrower than the faction
-    // seal under it: a slim hull's front view leaves the seal its own width.
-    const seal = ship.faction ? SEAL_WIDTH : 0;
-    const fitted = room / (length + frontWidth);
-    const byWidth = frontWidth * fitted >= seal ? fitted : (room - seal) / length;
-    return Math.min(byWidth, (innerHeight * MAX_DRAWING_HEIGHT - GAP) / height);
+    return Math.min(
+      room / (length + frontWidth),
+      (innerHeight * MAX_DRAWING_HEIGHT - GAP) / height,
+    );
   });
   /** CSS pixels per captured pixel. */
   const px = $derived(drawing ? k * drawing.metersPerPixel : 0);
@@ -172,14 +169,14 @@
             {/if}
           </div>
 
-          <div class="flex flex-col" style:gap="{GAP * 0.8}px">
+          <div>
             {#if front}
               <figure
                 class="build relative"
                 style:--delay="250ms"
                 style:margin-top="{slot.height / 2 - front.centerY * px}px"
               >
-                <div class="relative">
+                <div class="relative w-fit">
                   <img
                     src={front.url}
                     alt="{ship.name}, front"
@@ -190,25 +187,6 @@
                   </div>
                 </div>
                 <figcaption><b>C</b> Front</figcaption>
-              </figure>
-            {/if}
-
-            {#if ship.faction}
-              <!-- The builder's seal: its emblem in ink, its motto and story. -->
-              <figure class="build faction" style:--delay="800ms" style:width="{SEAL_WIDTH}px">
-                {#if ship.faction.logo_url}
-                  <div class="seal">
-                    <div class="emblem" style:--emblem="url('{ship.faction.logo_url}')"></div>
-                  </div>
-                {/if}
-                <p class="faction-name">{ship.faction.name}</p>
-                {#if ship.faction.tagline}
-                  <p class="tagline">{ship.faction.tagline}</p>
-                {/if}
-                {#if ship.faction.description}
-                  <p class="story">{ship.faction.description}</p>
-                {/if}
-                <figcaption><b>D</b> Issuing authority</figcaption>
               </figure>
             {/if}
           </div>
@@ -241,8 +219,31 @@
     <BonusList groups={ship.bonuses} />
   </DrawnZone>
 
+  {#if ship.faction}
+    <!-- The builder's seal: its emblem in ink, its motto and story. -->
+    <DrawnZone {built} delay={ZONE_STAGGER * 5} class="zone-pad lg:col-span-2">
+      {@render heading('05', 'Issuing authority', 'The faction that builds the ship')}
+      <div class="flex flex-col gap-8 sm:flex-row sm:items-start">
+        {#if ship.faction.logo_url}
+          <div class="seal">
+            <div class="emblem" style:--emblem="url('{ship.faction.logo_url}')"></div>
+          </div>
+        {/if}
+        <div class="max-w-3xl">
+          <p class="faction-name">{ship.faction.name}</p>
+          {#if ship.faction.tagline}
+            <p class="tagline">{ship.faction.tagline}</p>
+          {/if}
+          {#if ship.faction.description}
+            <p class="story">{ship.faction.description}</p>
+          {/if}
+        </div>
+      </div>
+    </DrawnZone>
+  {/if}
+
   <!-- The title block. -->
-  <DrawnZone {built} delay={ZONE_STAGGER * 5} class="lg:col-span-2">
+  <DrawnZone {built} delay={ZONE_STAGGER * 6} class="lg:col-span-2">
     <dl class="title-block">
       {#each titleBlock as [label, value] (label)}
         <div>
@@ -412,12 +413,12 @@
     padding: 0.5rem 0;
   }
 
-  /* D: the faction's seal: its emblem inked into a drafting circle. */
+  /* 05: the faction's seal: its emblem inked into a drafting circle. */
   .seal {
     position: relative;
+    flex-shrink: 0;
     width: 8.5rem;
     aspect-ratio: 1;
-    margin-bottom: 1.25rem;
     border: 1px solid rgb(108 196 255 / 0.45);
     border-radius: 50%;
   }

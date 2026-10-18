@@ -1,8 +1,12 @@
 <script lang="ts">
   import './layout.css';
   import { onNavigate } from '$app/navigation';
+  import BootScreen from '$lib/components/boot-screen.svelte';
+  import ShipLeap from '$lib/components/ship-leap.svelte';
   import SiteBar from '$lib/components/site-bar.svelte';
   import Stage from '$lib/components/stage.svelte';
+  import { leap } from '$lib/leap.svelte';
+  import { stage } from '$lib/stage.svelte';
 
   let { children } = $props();
 
@@ -15,6 +19,8 @@
     }
     // Livery changes only touch the query; the stage animates those itself.
     if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
+    // A leap to a related ship runs under its own cover (ship-leap.svelte).
+    if (leap.phase) return;
 
     // Explorer and ship page sit side by side: opening a ship shifts the page
     // over to the left, going back shifts it the other way (layout.css).
@@ -43,11 +49,18 @@
      placements (absolute, page coordinates) are measured from the page top
      and clipped to the page instead of growing it. -->
 <div class="relative">
-  <div class="pointer-events-none absolute inset-0 z-10 overflow-clip">
+  <!-- A leap's ship rides above its cover (ship-leap.svelte, z-30). -->
+  <div
+    class="pointer-events-none absolute inset-0 overflow-clip {stage.leap?.shown
+      ? 'z-[35]'
+      : 'z-10'}"
+  >
     <Stage />
   </div>
 
   <SiteBar />
+  <BootScreen />
+  <ShipLeap />
 
   {@render children()}
 

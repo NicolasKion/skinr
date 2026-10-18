@@ -149,6 +149,18 @@
   }
 }
 
+/* While the boot screen covers the first load (boot-screen.svelte), the
+   page holds its animations and scrolling, so everything starts together
+   once the first ship is ready. */
+html[data-booting] {
+  overflow: hidden;
+}
+html[data-booting] *,
+html[data-booting] *::before,
+html[data-booting] *::after {
+  animation-play-state: paused !important;
+}
+
 /* Frosted glass: the panels floating over the 3D stage. */
 @utility glass {
   background: var(--glass);

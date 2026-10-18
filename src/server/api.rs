@@ -65,6 +65,8 @@ struct FactionInfo {
     id: i32,
     name: String,
     logo_url: Option<String>,
+    /// The race this faction is the home empire of, if it is one.
+    empire_of: Option<i32>,
 }
 
 /// A ship's faction in full: its emblem, motto and description as plain text.
@@ -89,10 +91,23 @@ struct FactionDetailRow {
 /// Faction logos change only with a client patch; a day is plenty.
 const LOGO_CACHE_CONTROL: &str = "public, max-age=86400";
 
-/// Selects factions with `logo_url` for those whose logo is stored.
-const FACTION_SELECT: &str = "select f.id, f.name,
-        case when l.name is null then null else '/api/logos/' || l.name || '.png' end as logo_url
-     from factions f left join faction_logos l on l.name = f.logo";
+/// The Jove Empire, whose emblem the game client does not ship.
+const JOVE_EMPIRE: i32 = 500005;
+/// Its emblem from Wikimedia Commons, served by the frontend's static files.
+const JOVE_EMPIRE_LOGO: &str = "/logos/jove_logo.svg";
+
+/// Selects factions with `logo_url` for those whose logo is stored, or that
+/// have one of our own.
+fn faction_select() -> String {
+    format!(
+        "select f.id, f.name, f.empire_of,
+            case
+                when l.name is not null then '/api/logos/' || l.name || '.png'
+                when f.id = {JOVE_EMPIRE} then '{JOVE_EMPIRE_LOGO}'
+            end as logo_url
+         from factions f left join faction_logos l on l.name = f.logo"
+    )
+}
 
 /// A ship's Space Object Factory DNA, `hull:faction:race`.
 fn dna(hull: &str, faction: &str, race: &str) -> String {
@@ -217,7 +232,8 @@ async fn catalog(State(pool): State<PgPool>) -> Result<Json<Catalog>, Response> 
     .collect();
 
     let factions = sqlx::query_as::<_, FactionInfo>(sqlx::AssertSqlSafe(format!(
-        "{FACTION_SELECT} where f.id in (select faction_id from ships) order by f.name"
+        "{} where f.id in (select faction_id from ships) order by f.name",
+        faction_select()
     )))
     .fetch_all(&pool)
     .await
@@ -470,7 +486,8 @@ async fn ship(
     let faction = match row.faction_id {
         Some(faction_id) => sqlx::query_as::<_, FactionDetailRow>(sqlx::AssertSqlSafe(format!(
             "select f.id, f.name, faction.logo_url, f.tagline, f.description
-             from factions f join ({FACTION_SELECT}) faction using (id) where f.id = $1"
+             from factions f join ({}) faction using (id) where f.id = $1",
+            faction_select()
         )))
         .bind(faction_id)
         .fetch_optional(&pool)

@@ -3,8 +3,8 @@
 // beside the explorer, or hidden) and what to show, and it animates between
 // those places on its own.
 import type { ShipSummary } from './types';
-import { HERO_POSE, type CameraPose } from './viewer/poses';
-import type { Blueprint } from './viewer/engine';
+import { HERO_POSE, type CameraPose, type ScreenRect } from './viewer/poses';
+import type { Blueprint, EngineStage } from './viewer/engine';
 
 export interface StagePlacement {
   /** Horizontal shift, in viewport widths. */
@@ -86,6 +86,14 @@ class Stage {
   blueprint = $state<{ dna: string; drawing: Blueprint } | null>(null);
   status = $state<StageStatus>('idle');
   error = $state<string | null>(null);
+  /** How far the engine has started, for the boot screen. */
+  engineStage = $state<EngineStage | null>(null);
+  /**
+   * Whether the visit's first ship is loaded and on its way in (or there is
+   * none to wait for, or it failed). Until then the boot screen covers the
+   * page and the page holds its animations (boot-screen.svelte).
+   */
+  booted = $state(false);
   /**
    * The res:/ paths the ship on stage could not load (not in the client's
    * file index, or refused by the CDN). Cleared for every new ship or livery.
@@ -101,10 +109,29 @@ class Stage {
    * cards name themselves only when they hold this ship.
    */
   morphId = $state<number | null>(null);
+  /**
+   * The ship whose hull is on screen: it changes as a new ship starts
+   * flying or sliding in, not when it is asked for, so a page can change
+   * its labels in step with the hull.
+   */
+  onScreen = $state<ShipSummary | null>(null);
+  /**
+   * Whether a different ship slides in from a side like a livery does,
+   * instead of flying in (the explorer's dock, a carousel of hulls).
+   */
+  slideShips = $state(false);
   /** Which side the next livery of the same ship slides in from. */
   direction: 1 | -1 = 1;
+  /**
+   * A leap to another ship ($lib/leap.svelte.ts): the stage covers the
+   * viewport and builds the next ship pinned over its card's picture at
+   * `rect`, out of sight until `shown`.
+   */
+  leap = $state<{ rect: ScreenRect; shown: boolean } | null>(null);
   /** Set by the stage component once the renderer exists. */
   resetView: (() => void) | null = null;
+  /** Lets the pinned ship of a leap move into the normal framing over that many ms. */
+  releasePin: ((duration: number) => void) | null = null;
 
   /**
    * A SOF pattern the DNA needs that the SOF does not ship (a SKINR design's),

@@ -21,6 +21,8 @@ export interface FactionInfo {
   id: number;
   name: string;
   logo_url: string | null;
+  /** The race this faction is the home empire of (Amarr, Caldari, Gallente, Minmatar). */
+  empire_of: number | null;
 }
 
 /** A ship's faction in full, for the blueprint's faction panel. */

@@ -1,10 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { cubicInOut } from 'svelte/easing';
+  import type { TransitionConfig } from 'svelte/transition';
   import { ArrowRight, LoaderCircle } from '@lucide/svelte';
+  import CardCarousel from '$lib/components/card-carousel.svelte';
   import ShipThumbnail from '$lib/components/ship-thumbnail.svelte';
+  import * as Carousel from '$lib/components/ui/carousel';
   import FactionEmblem from '$lib/components/faction-emblem.svelte';
   import Logo from '$lib/components/logo.svelte';
-  import { raceTint } from '$lib/eve';
+  import { raceTint, shipBuilders } from '$lib/eve';
   import ShipFilters from '$lib/components/ship-filters.svelte';
   import StageAlert from '$lib/components/stage-alert.svelte';
   import { nav } from '$lib/nav.svelte';
@@ -81,17 +85,18 @@
     'Vindicator',
   ]);
 
-  let race = $state<number | null>(null);
+  /** The builder tab picked: a race or a faction's key, or null for all. */
+  let builder = $state<string | null>(null);
   let query = $state('');
 
   const groupNames = $derived(new Map(catalog.groups.map((group) => [group.id, group.name])));
-  const raceNames = $derived(new Map(catalog.races.map((entry) => [entry.id, entry.name])));
+  const builders = $derived(shipBuilders(catalog));
 
   const filtered = $derived.by(() => {
     const needle = query.trim().toLowerCase();
     return catalog.ships.filter(
       (ship) =>
-        (race === null || ship.race_id === race) &&
+        (builder === null || builders.of(ship).key === builder) &&
         (!needle ||
           ship.name.toLowerCase().includes(needle) ||
           (groupNames.get(ship.group_id) ?? '').toLowerCase().includes(needle)),
@@ -126,6 +131,23 @@
       if (pick) stage.show(pick);
     }
   });
+  // Picking another ship slides its hull in beside the last one.
+  $effect(() => {
+    stage.slideShips = true;
+    return () => {
+      stage.slideShips = false;
+    };
+  });
+
+  /**
+   * Which side a newly picked ship slides in from: from the right for one
+   * further along the shelves than the ship on stage, else from the left.
+   */
+  function sideOf(ship: ShipSummary): 1 | -1 {
+    const order = shelves.flatMap((shelf) => shelf.ships.map((candidate) => candidate.id));
+    const current = stage.ship ? order.indexOf(stage.ship.id) : -1;
+    return order.indexOf(ship.id) >= current ? 1 : -1;
+  }
 
   /**
    * A card's first click previews its ship in the dock; a click on the ship
@@ -137,16 +159,17 @@
       event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
     if (plain && stage.ship?.id !== ship.id) {
       event.preventDefault();
-      stage.show(ship);
+      stage.show(ship, ship.dna, sideOf(ship));
       return;
     }
     stage.morphId = ship.id;
   }
 
-  // The race filter's tabs: all, then each race in the catalog.
-  const raceTabs = $derived<{ id: number | null; name: string }[]>([
+  // The builder filter's tabs: all, the races, then the factions that build
+  // their own ships.
+  const builderTabs = $derived<{ id: string | null; name: string; logo?: string | null }[]>([
     { id: null, name: 'All' },
-    ...catalog.races,
+    ...builders.all.map((entry) => ({ id: entry.key, name: entry.name, logo: entry.logo })),
   ]);
 
   /** Where the site bar ends, in px from the top: its inset, its height and a gap. */
@@ -188,7 +211,7 @@
   // under it, so the list in view is the list the filter made.
   let filterSeen = false;
   $effect(() => {
-    void race;
+    void builder;
     void query;
     if (!filterSeen) {
       filterSeen = true;
@@ -201,7 +224,34 @@
     });
   });
 
-  const docked = $derived(stage.ship);
+  // The dock's labels, emblem and tint follow the hull on screen, so they
+  // change as it slides in rather than when it is picked.
+  const docked = $derived(stage.onScreen ?? stage.ship);
+  /** The side the hull on screen came in from; its labels follow it. */
+  let side = $state<1 | -1>(1);
+  $effect.pre(() => {
+    void docked?.id;
+    side = untrack(() => stage.direction);
+  });
+
+  /** How far the dock's labels and emblem travel as hulls change, in px. */
+  const SWAP_DISTANCE = 48;
+  /** How long they take, in ms: about the hull's own glide. */
+  const SWAP_MS = 1100;
+  /**
+   * Slides an element in from the side the new hull comes from, or out the
+   * way the old one leaves, fading and blurring on the way.
+   */
+  function swap(_node: Element, { leaving }: { leaving: boolean }): TransitionConfig {
+    const offset = SWAP_DISTANCE * (leaving ? -side : side);
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return {
+      duration: still ? 0 : SWAP_MS,
+      easing: cubicInOut,
+      css: (t, u) =>
+        `opacity: ${t}; transform: translateX(${u * offset}px); filter: blur(${u * 6}px)`,
+    };
+  }
   const dockTint = $derived(raceTint(docked?.race_id));
   const factionLogos = $derived(
     new Map(catalog.factions.map((faction) => [faction.id, faction.logo_url])),
@@ -219,7 +269,7 @@
 </script>
 
 <svelte:head>
-  <title>skinr.space</title>
+  <title>skinr.space · Try on EVE ship skins</title>
 </svelte:head>
 
 <svelte:window onkeydown={onKeydown} />
@@ -230,8 +280,8 @@
 <!-- The filters as the site bar shows them once docked. -->
 {#snippet barFilters()}
   <ShipFilters
-    races={raceTabs}
-    bind:race
+    tabs={builderTabs}
+    bind:builder
     bind:query
     compact
     bind:this={dockedFilters}
@@ -242,14 +292,15 @@
 <main class="explorer px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10">
   <section class="mb-14 max-w-4xl">
     <p class="eyebrow mb-5 text-muted-foreground">
-      {catalog.ships.length} ships · SDE {catalog.sde_build ?? 'unknown'}
+      {catalog.ships.length} hulls · SKINR market · SDE {catalog.sde_build ?? 'unknown'}
     </p>
     <h1 class="display text-[clamp(3rem,8vw,6.5rem)]">
-      <span class="text-sheen">Every ship.<br />In three dimensions.</span>
+      <span class="text-sheen">Try on every skin.<br />Before you buy it.</span>
     </h1>
     <p class="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-      Built live from the EVE Online client and drawn with EVE's own shaders, right in your browser.
-      Click a ship to preview it, click it again to fly around it.
+      Every skin in EVE Online and every SKINR design up for sale on the Paragon Hub, on the real
+      hull in 3D. Pick a ship to preview it, pick it again to see everything it can wear. Selling a
+      design? It shows up here once it is listed.
     </p>
   </section>
 
@@ -261,7 +312,7 @@
     class:docked={filtersDocked}
     inert={filtersDocked}
   >
-    <ShipFilters races={raceTabs} bind:race bind:query bind:this={pageFilters} />
+    <ShipFilters tabs={builderTabs} bind:builder bind:query bind:this={pageFilters} />
   </div>
 
   <!-- At least a screen tall, so a short result list can still scroll the
@@ -270,63 +321,66 @@
     <div class="min-w-0">
       {#each shelves as shelf (shelf.group.id)}
         <section class="reveal mb-12">
-          <div class="mb-4 flex items-baseline gap-3">
-            <h2 class="text-2xl font-semibold tracking-tight">{shelf.group.name}</h2>
-            <span class="text-sm text-muted-foreground">{shelf.ships.length}</span>
-          </div>
-          <div
-            class="-mx-6 flex snap-x snap-mandatory scroll-px-6 gap-4 overflow-x-auto px-6 pb-4 no-scrollbar"
-          >
+          <CardCarousel label="{shelf.group.name} ships">
+            {#snippet heading()}
+              <div class="flex items-baseline gap-3">
+                <h2 class="text-2xl font-semibold tracking-tight">{shelf.group.name}</h2>
+                <span class="text-sm text-muted-foreground">{shelf.ships.length}</span>
+              </div>
+            {/snippet}
             {#each shelf.ships as ship (ship.id)}
               {@const tint = ship.colors.primary ?? raceTint(ship.race_id)}
-              <a
-                href="/ships/{ship.id}"
-                class="group w-52 shrink-0 snap-start"
-                onclick={(event) => onCardClick(event, ship)}
-                style:--glow={tint}
-              >
-                <div class="relative">
-                  <!-- A soft halo in the livery's color, blooming behind the tile on hover. -->
-                  <div
-                    class="absolute inset-4 rounded-full opacity-0 blur-2xl transition-opacity duration-700 group-hover:opacity-60"
-                    style:background="var(--glow)"
-                  ></div>
-                  <div
-                    class="relative aspect-square overflow-hidden rounded-[1.75rem] bg-foreground/[0.03] shadow-[0_30px_60px_-30px_var(--shadow),inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_4%,transparent)] transition-transform duration-500 ease-[var(--ease-apple)] {stage
-                      .ship?.id === ship.id
-                      ? 'shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1.5px_rgb(255_255_255/0.5)]'
-                      : ''}"
-                  >
-                    <ShipThumbnail
-                      id={ship.id}
-                      raceId={ship.race_id}
-                      logoUrl={ship.faction_id != null ? factionLogos.get(ship.faction_id) : null}
-                      class="h-full w-full transition-transform duration-700 ease-[var(--ease-apple)] group-hover:-translate-y-[3%] group-hover:scale-[1.1]"
-                    >
-                      {#snippet fallback()}
-                        <div
-                          class="grid h-full w-full place-items-center"
-                          style:background="radial-gradient(60% 60% at 50% 45%, color-mix(in oklab, {tint}
-                          22%, transparent), transparent)"
-                        >
-                          <Logo class="size-10 text-foreground/25" />
-                        </div>
-                      {/snippet}
-                    </ShipThumbnail>
-                  </div>
-                </div>
-                <p
-                  class="mt-3.5 truncate text-[0.95rem] font-medium"
-                  style:view-transition-name={stage.morphId === ship.id ? 'ship-name' : undefined}
+              <Carousel.Item class="basis-auto">
+                <a
+                  href="/ships/{ship.id}"
+                  class="group block w-52"
+                  onclick={(event) => onCardClick(event, ship)}
+                  style:--glow={tint}
                 >
-                  {ship.name}
-                </p>
-                <p class="truncate text-xs text-muted-foreground">
-                  {raceNames.get(ship.race_id ?? -1) ?? 'Unaffiliated'}
-                </p>
-              </a>
+                  <div class="relative">
+                    <!-- A soft halo in the livery's color, blooming behind the tile on hover. -->
+                    <div
+                      class="absolute inset-4 rounded-full opacity-0 blur-2xl transition-opacity duration-700 group-hover:opacity-60"
+                      style:background="var(--glow)"
+                    ></div>
+                    <div
+                      class="relative aspect-square overflow-hidden rounded-[1.75rem] bg-foreground/[0.03] shadow-[0_30px_60px_-30px_var(--shadow),inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_4%,transparent)] transition-transform duration-500 ease-[var(--ease-apple)] {stage
+                        .ship?.id === ship.id
+                        ? 'shadow-[0_30px_60px_-30px_rgb(0_0_0/0.9),inset_0_0_0_1.5px_rgb(255_255_255/0.5)]'
+                        : ''}"
+                    >
+                      <ShipThumbnail
+                        id={ship.id}
+                        raceId={ship.race_id}
+                        logoUrl={ship.faction_id != null ? factionLogos.get(ship.faction_id) : null}
+                        class="h-full w-full transition-transform duration-700 ease-[var(--ease-apple)] group-hover:-translate-y-[3%] group-hover:scale-[1.1]"
+                      >
+                        {#snippet fallback()}
+                          <div
+                            class="grid h-full w-full place-items-center"
+                            style:background="radial-gradient(60% 60% at 50% 45%, color-mix(in
+                            oklab, {tint}
+                            22%, transparent), transparent)"
+                          >
+                            <Logo class="size-10 text-foreground/25" />
+                          </div>
+                        {/snippet}
+                      </ShipThumbnail>
+                    </div>
+                  </div>
+                  <p
+                    class="mt-3.5 truncate text-[0.95rem] font-medium"
+                    style:view-transition-name={stage.morphId === ship.id ? 'ship-name' : undefined}
+                  >
+                    {ship.name}
+                  </p>
+                  <p class="truncate text-xs text-muted-foreground">
+                    {builders.of(ship).name}
+                  </p>
+                </a>
+              </Carousel.Item>
             {/each}
-          </div>
+          </CardCarousel>
         </section>
       {:else}
         <p class="py-20 text-center text-muted-foreground">No ships match “{query}”.</p>
@@ -340,38 +394,39 @@
      own stacking context, so they cannot share one element. The frame runs
      past the right edge so only its left corners show. -->
 <div
-  class="explorer peek pointer-events-none fixed top-[4.5rem] right-[-3rem] bottom-3 z-0 hidden rounded-l-[2.25rem] transition-[background] duration-700 lg:block"
-  style:background="radial-gradient(70% 55% at 40% 50%, color-mix(in oklab, {dockTint} 20%, transparent),
-  transparent 70%), linear-gradient(90deg, color-mix(in oklab, var(--foreground) 5%, transparent), color-mix(in
-  oklab, var(--foreground) 1.5%, transparent) 40%)"
+  class="explorer peek peek-frame pointer-events-none fixed top-[4.5rem] right-[-3rem] bottom-3 z-0 hidden rounded-l-[2.25rem] lg:block"
+  style:--dock-tint={dockTint}
   use:dockTarget
 >
-  {#if dockLogo}
-    {#key dockLogo}
-      <FactionEmblem
-        url={dockLogo}
-        tint={dockTint}
-        opacity={0.1}
-        class="peek-emblem absolute top-1/2 left-[42%] size-[min(48rem,70vh)] -translate-x-1/2 -translate-y-1/2"
-      />
-    {/key}
-  {/if}
+  {#key dockLogo}
+    <div
+      class="absolute top-1/2 left-[42%] size-[min(48rem,70vh)] -translate-x-1/2 -translate-y-1/2"
+      in:swap={{ leaving: false }}
+      out:swap={{ leaving: true }}
+    >
+      {#if dockLogo}
+        <FactionEmblem url={dockLogo} tint={dockTint} opacity={0.1} class="size-full" />
+      {/if}
+    </div>
+  {/key}
 </div>
 
 {#if docked}
   <div
     class="explorer peek pointer-events-none fixed top-[4.5rem] right-0 bottom-3 z-20 hidden flex-col justify-between p-9 lg:flex"
   >
-    {#key docked.id}
-      <div class="peek-label">
-        <StageAlert name={docked.name} class="pointer-events-auto mb-6" />
-        <p class="eyebrow" style:color={dockTint}>
-          {groupNames.get(docked.group_id)} · {raceNames.get(docked.race_id ?? -1) ??
-            'Unaffiliated'}
-        </p>
-        <p class="display mt-3 text-[clamp(2.5rem,4vw,4rem)]">{docked.name}</p>
-      </div>
-    {/key}
+    <!-- Labels stack in one cell, so the old one can leave while the new one arrives. -->
+    <div class="grid">
+      {#key docked.id}
+        <div class="[grid-area:1/1]" in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
+          <StageAlert name={docked.name} class="pointer-events-auto mb-6" />
+          <p class="eyebrow" style:color={dockTint}>
+            {groupNames.get(docked.group_id)} · {builders.of(docked).name}
+          </p>
+          <p class="display mt-3 text-[clamp(2.5rem,4vw,4rem)]">{docked.name}</p>
+        </div>
+      {/key}
+    </div>
     <div class="flex items-center justify-between gap-4">
       <span class="flex items-center gap-2 text-xs text-muted-foreground">
         {#if stage.status === 'starting' || stage.status === 'loading'}
@@ -407,23 +462,25 @@
       inset 1px 0 0 color-mix(in oklab, var(--foreground) 7%, transparent),
       -40px 0 80px -40px var(--shadow);
   }
-  .peek-label {
-    animation: label-in 0.7s var(--ease-out-expo) both;
+  /* Registered so the race glow fades from one race's color to the next. */
+  @property --dock-tint {
+    syntax: '<color>';
+    inherits: false;
+    initial-value: transparent;
   }
-  .peek :global(.peek-emblem) {
-    animation: label-in 1.2s var(--ease-out-expo) both;
-  }
-  @keyframes label-in {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-      filter: blur(4px);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .peek-label {
-      animation: none;
-    }
+  .peek-frame {
+    background:
+      radial-gradient(
+        70% 55% at 40% 50%,
+        color-mix(in oklab, var(--dock-tint) 20%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in oklab, var(--foreground) 5%, transparent),
+        color-mix(in oklab, var(--foreground) 1.5%, transparent) 40%
+      );
+    transition: --dock-tint 1.3s var(--ease-apple);
   }
   /* Fades up and out as it docks into the site bar, and back on the way down. */
   .filter-row {

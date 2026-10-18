@@ -26,15 +26,17 @@ pub async fn seed(pool: &PgPool, tables: &ShipTables) -> sqlx::Result<()> {
 
     for faction in &tables.factions {
         sqlx::query(
-            "insert into factions (id, name, logo, description, tagline) values ($1, $2, $3, $4, $5)",
+            "insert into factions (id, name, logo, description, tagline, empire_of)
+             values ($1, $2, $3, $4, $5, $6)",
         )
         .bind(faction.id)
         .bind(&faction.name)
         .bind(&faction.logo)
         .bind(&faction.description)
         .bind(&faction.tagline)
-            .execute(&mut *tx)
-            .await?;
+        .bind(faction.empire_of)
+        .execute(&mut *tx)
+        .await?;
     }
 
     for meta in &tables.meta_groups {

@@ -1,3 +1,8 @@
+<script lang="ts" module>
+  /** The room around the ship in its picture, as a share of the card's width (its p-[8%]). */
+  export const THUMBNAIL_INSET = 0.08;
+</script>
+
 <script lang="ts">
   // A ship card's picture: our own thumbnail in the current theme
   // (scripts/render-thumbnails.ts, every ship from the same angle on a
@@ -58,6 +63,7 @@
     src="/api/thumbnails/{id}-{theme.current}.png"
     alt=""
     class="relative object-contain p-[8%] {className}"
+    data-thumbnail
     onerror={() => (missing = true)}
   />
 {/if}

@@ -123,6 +123,10 @@ struct FactionRow {
     description: Localized,
     #[serde(rename = "shortDescription", default)]
     short_description: Localized,
+    #[serde(rename = "memberRaces", default)]
+    member_races: Vec<i32>,
+    #[serde(rename = "militiaCorporationID")]
+    militia_corporation_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -339,6 +343,12 @@ pub fn parse<R: BufRead>(files: SdeFiles<R>) -> Result<ShipTables, Error> {
             logo: row.flat_logo,
             description: row.description.text(),
             tagline: Some(row.short_description.text()).filter(|text| !text.is_empty()),
+            // The four empires are the factions with a militia of their own
+            // that one race makes up; the pirates with militias have several.
+            empire_of: match (row.militia_corporation_id, row.member_races.as_slice()) {
+                (Some(_), [race]) => Some(*race),
+                _ => None,
+            },
         })
         .collect();
     factions.sort_by_key(|faction| faction.id);
@@ -491,9 +501,11 @@ mod tests {
             skinr_component_categories: b"",
             skinr_slots_to_materials: b"",
             factions: concat!(
-                r#"{"_key": 500001, "name": {"en": "Caldari State"}, "flatLogo": "caldari_logo", "description": {"en": "Ruled by corporations."}, "shortDescription": {"en": "Duty first."}}"#,
+                r#"{"_key": 500001, "name": {"en": "Caldari State"}, "flatLogo": "caldari_logo", "description": {"en": "Ruled by corporations."}, "shortDescription": {"en": "Duty first."}, "memberRaces": [1], "militiaCorporationID": 1000180}"#,
                 "\n",
-                r#"{"_key": 500005, "name": {"en": "Jove Empire"}}"#,
+                r#"{"_key": 500005, "name": {"en": "Jove Empire"}, "memberRaces": [16]}"#,
+                "\n",
+                r#"{"_key": 500010, "name": {"en": "Guristas Pirates"}, "memberRaces": [1, 8], "militiaCorporationID": 1000437}"#,
             )
             .as_bytes(),
         }
@@ -548,13 +560,25 @@ mod tests {
                     logo: Some("caldari_logo".into()),
                     description: "Ruled by corporations.".into(),
                     tagline: Some("Duty first.".into()),
+                    empire_of: Some(1),
                 },
+                // No militia: not an empire, even with one member race.
                 Faction {
                     id: 500005,
                     name: "Jove Empire".into(),
                     logo: None,
                     description: String::new(),
                     tagline: None,
+                    empire_of: None,
+                },
+                // A militia, but several member races: a pirate faction.
+                Faction {
+                    id: 500010,
+                    name: "Guristas Pirates".into(),
+                    logo: None,
+                    description: String::new(),
+                    tagline: None,
+                    empire_of: None,
                 },
             ]
         );

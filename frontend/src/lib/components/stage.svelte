@@ -6,7 +6,7 @@
   import { onMount, untrack } from 'svelte';
   import { stage } from '$lib/stage.svelte';
   import type { Engine, ShowTransition } from '$lib/viewer/engine';
-  import { TRANSITION_MS, easeInOut } from '$lib/viewer/poses';
+  import { HERO_POSE, TRANSITION_MS, easeInOut } from '$lib/viewer/poses';
 
   /**
    * How far the dock zooms in on the canvas, in dock widths per canvas width.
@@ -16,6 +16,8 @@
   const DOCK_ZOOM = 1.7;
   /** How far a dimmed stage fades. */
   const DIM_OPACITY = 0.85;
+  /** Lift the boot screen after this long, in ms, whatever is still loading. */
+  const BOOT_TIMEOUT = 30000;
 
   let host: HTMLDivElement;
   let engine = $state<Engine | null>(null);
@@ -24,24 +26,30 @@
   onMount(() => {
     let alive = true;
     stage.status = 'starting';
+    const giveUp = setTimeout(() => (stage.booted = true), BOOT_TIMEOUT);
     import('$lib/viewer/engine')
-      .then(({ getEngine }) => getEngine())
+      .then(({ getEngine }) => getEngine((step) => (stage.engineStage = step)))
       .then((ready) => {
         if (!alive) return;
+        // A page without a ship has nothing more to wait for.
+        if (!stage.dna) stage.booted = true;
         host.append(ready.renderer.canvas);
         ready.renderer.onMissing = (path, error) => {
           console.warn(`Missing resource ${path}: ${error.message}`);
           if (!stage.missing.includes(path)) stage.missing = [...stage.missing, path];
         };
         stage.resetView = () => ready.renderer.resetView();
+        stage.releasePin = (duration) => ready.renderer.releasePin(duration);
         engine = ready;
       })
       .catch((error: Error) => {
         stage.status = 'error';
         stage.error = error.message;
+        stage.booted = true;
       });
     return () => {
       alive = false;
+      clearTimeout(giveUp);
     };
   });
 
@@ -54,10 +62,22 @@
     const dna = stage.dna;
     const shipId = stage.ship?.id ?? null;
     if (!current || !dna) return;
+    const ship = stage.ship;
+    const { leap, slideShips } = untrack(() => ({
+      leap: stage.leap,
+      slideShips: stage.slideShips,
+    }));
+    const arrive = () => {
+      if (stage.dna === dna) stage.onScreen = ship;
+    };
+    const slides =
+      shipId !== null && shownShipId !== null && (shipId === shownShipId || slideShips);
     const transition: ShowTransition =
-      shipId !== null && shipId === shownShipId
-        ? { kind: 'slide', direction: stage.direction }
-        : { kind: 'fly' };
+      leap && !leap.shown
+        ? { kind: 'pin', rect: leap.rect }
+        : slides
+          ? { kind: 'slide', direction: stage.direction, onGlide: arrive }
+          : { kind: 'fly' };
     shownShipId = shipId;
     stage.status = 'loading';
     stage.error = null;
@@ -66,12 +86,18 @@
     current
       .show(dna, transition)
       .then((shown) => {
-        if (shown && stage.dna === dna) stage.status = 'ready';
+        if (shown && stage.dna === dna) {
+          stage.status = 'ready';
+          stage.booted = true;
+          arrive();
+        }
       })
       .catch((error: Error) => {
         if (stage.dna !== dna) return;
+        arrive();
         stage.status = 'error';
         stage.error = error.message;
+        stage.booted = true;
       });
   });
 
@@ -106,7 +132,7 @@
   function place(inPage: boolean): Geometry {
     const { width: vw, height: vh } = viewport;
     const found = stage.dock;
-    if (stage.mode !== 'dock' || !found) return FULL;
+    if (leaping || stage.mode !== 'dock' || !found) return FULL;
     const dock = inPage ? { ...found, x: found.pageX, y: found.pageY } : found;
     // The blueprint covers its slot exactly (the camera frames the hull to
     // it); other docks zoom in only so far.
@@ -126,6 +152,8 @@
       radius: fitted ? 0 : stage.dockRadius / scale,
     };
   }
+  /** During a leap the stage covers the viewport as is, whatever the page wants. */
+  const leaping = $derived(stage.leap !== null);
   const target = $derived(place(false));
   const targetInPage = $derived(place(true));
 
@@ -165,13 +193,13 @@
 
   // A change of place glides only when the hero is one end of it; the swap
   // between the two docks happens off screen and is instant.
-  const placeKey = $derived(`${stage.mode}:${stage.dockName}`);
+  const placeKey = $derived(`${stage.mode}:${stage.dockName}:${leaping}`);
   let lastMode = stage.mode;
   $effect(() => {
     void placeKey;
     const mode = stage.mode;
     untrack(() => {
-      const glides = (lastMode === 'hero' || mode === 'hero') && lastMode !== mode;
+      const glides = !leaping && (lastMode === 'hero' || mode === 'hero') && lastMode !== mode;
       lastMode = mode;
       const from = anchored
         ? { ...shown, tx: shown.tx - window.scrollX, ty: shown.ty - window.scrollY }
@@ -186,7 +214,10 @@
     const tick = (now: number) => {
       request = requestAnimationFrame(tick);
       let next: Geometry;
-      if (move) {
+      if (leaping) {
+        next = FULL;
+        anchored = false;
+      } else if (move) {
         const t = Math.min(1, (now - move.start) / TRANSITION_MS);
         next = blend(move.from, target, easeInOut(t));
         if (t >= 1) move = null;
@@ -212,17 +243,26 @@
     `inset(${shown.top}px ${shown.right}px ${shown.bottom}px ${shown.left}px round ${shown.radius}px)`,
   );
 
-  const visible = $derived(stage.mode === 'hero' || (stage.mode === 'dock' && stage.dock !== null));
+  const visible = $derived(
+    stage.leap
+      ? stage.leap.shown
+      : stage.mode === 'hero' || (stage.mode === 'dock' && stage.dock !== null),
+  );
   // Only the hero moves beside the page; the dock has its own frame.
-  const placement = $derived(stage.mode === 'hero' ? stage.placement : { x: 0, scale: 1 });
-  const dim = $derived(stage.mode === 'hero' ? stage.dim : 0);
+  const placement = $derived(
+    stage.mode === 'hero' && !leaping ? stage.placement : { x: 0, scale: 1 },
+  );
+  const dim = $derived(stage.mode === 'hero' && !leaping ? stage.dim : 0);
 
+  // A leap lands on the hero's framing; set again only when it changes, so
+  // the end of a leap does not interrupt the spin.
+  const pose = $derived(leaping ? HERO_POSE : stage.pose);
   $effect(() => {
-    engine?.renderer.setPose(stage.pose);
+    engine?.renderer.setPose(pose);
   });
 
   $effect(() => {
-    engine?.renderer.setHologram(stage.hologram);
+    engine?.renderer.setHologram(leaping ? 0 : stage.hologram);
   });
 
   // A broken ship shows as a broken signal.
@@ -246,14 +286,15 @@
     return (vh * scale) / (2 * pixelsPerMetre);
   });
   $effect(() => {
-    engine?.renderer.setBlueprint(blueprintHalfHeight);
+    engine?.renderer.setBlueprint(leaping ? null : blueprintHalfHeight);
   });
 
   // Draw the blueprint once the ship (in this livery) is fully on stage.
   let drafting: string | null = null;
   $effect(() => {
     const dna = stage.dna;
-    if (!engine || !stage.wantBlueprint || stage.status !== 'ready' || !dna) return;
+    // Not mid-leap: the pinned camera would draw it.
+    if (!engine || !stage.wantBlueprint || stage.status !== 'ready' || !dna || leaping) return;
     if (stage.blueprint?.dna === dna || drafting === dna) return;
     drafting = dna;
     engine.renderer
@@ -272,8 +313,9 @@
 
 <div
   class="stage top-0 left-0 z-10 h-dvh w-screen origin-top-left {anchored ? 'absolute' : 'fixed'}"
-  class:pointer-events-none={!visible}
-  class:pointer-events-auto={visible}
+  class:leaping
+  class:pointer-events-none={!visible || leaping}
+  class:pointer-events-auto={visible && !leaping}
   style:transform
   style:clip-path={clip}
   style:opacity={visible ? 1 : 0}
@@ -292,6 +334,11 @@
     view-transition-name: stage;
     transition: opacity 0.7s var(--ease-apple);
     will-change: transform, clip-path;
+  }
+  /* A leap shows and places the stage at once. */
+  .stage.leaping,
+  .stage.leaping .canvas-host {
+    transition: none;
   }
   /* The hero's shift beside a chapter's text: same length and curve as
      every other place transition. */

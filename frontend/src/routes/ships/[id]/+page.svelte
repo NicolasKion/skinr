@@ -13,7 +13,8 @@
   import ShipRail from '$lib/components/ship-rail.svelte';
   import SkinIcon from '$lib/components/skin-icon.svelte';
   import StageAlert from '$lib/components/stage-alert.svelte';
-  import { firstSentence, raceTint, typeRender } from '$lib/eve';
+  import { firstSentence, raceTint, shipBuilders, typeRender } from '$lib/eve';
+  import { leapTo } from '$lib/leap.svelte';
   import { nav } from '$lib/nav.svelte';
   import { CENTER, stage, type StagePlacement } from '$lib/stage.svelte';
   import {
@@ -237,7 +238,8 @@
     return pickerWidth / 2 - (selected.offsetLeft + selected.offsetWidth / 2);
   });
 
-  const raceNames = $derived(new Map(data.catalog.races.map((race) => [race.id, race.name])));
+  const builders = $derived(shipBuilders(data.catalog));
+  const builderOf = (other: ShipSummary) => builders.of(other).name;
   const groupNames = $derived(new Map(data.catalog.groups.map((group) => [group.id, group.name])));
   const metaGroups = $derived(new Map(data.catalog.meta_groups.map((meta) => [meta.id, meta])));
   const factionLogos = $derived(
@@ -310,7 +312,7 @@
     nav.sections = [
       ...(ship.description ? [{ id: 'profile', label: 'Profile' }] : []),
       { id: 'blueprint', label: 'Blueprint' },
-      ...(wearable ? [{ id: 'liveries', label: 'Liveries' }] : []),
+      ...(wearable ? [{ id: 'liveries', label: 'Skins' }] : []),
       ...(rails.length ? [{ id: 'related', label: 'Related' }] : []),
     ];
     nav.reset = () => stage.resetView?.();
@@ -322,7 +324,7 @@
 </script>
 
 <svelte:head>
-  <title>{ship.name} · skinr.space</title>
+  <title>{ship.name} skins · skinr.space</title>
 </svelte:head>
 
 <svelte:window bind:innerWidth onkeydown={onKeydown} />
@@ -375,7 +377,7 @@
     >
       <div class="intro max-w-xl">
         <p class="eyebrow mb-3" style:color={tint}>
-          {[ship.race?.name, ship.group.name, ship.meta_group?.name].filter(Boolean).join(' · ')}
+          {[builderOf(summary), ship.group.name, ship.meta_group?.name].filter(Boolean).join(' · ')}
         </p>
         <h1
           class="display text-[clamp(3.25rem,7.5vw,6.5rem)]"
@@ -393,7 +395,7 @@
       <div class="intro intro-late pointer-events-auto flex max-w-full flex-col items-end gap-3">
         <p class="text-sm text-foreground/80">
           <kbd class="mr-2 hidden text-[0.7rem] text-muted-foreground/70 lg:inline">← →</kbd>
-          <span class="text-muted-foreground">Livery</span>
+          <span class="text-muted-foreground">Skin</span>
           <span class="mx-1.5 text-foreground/20">/</span>{liveryName}
         </p>
         <div
@@ -496,15 +498,16 @@
           placement={RIGHT}
         />
         <div class="chapter-text relative">
-          <p class="reveal eyebrow mb-4" style:color={tint}>Liveries</p>
+          <p class="reveal eyebrow mb-4" style:color={tint}>Skins</p>
           <h2 class="reveal display mb-4 text-[clamp(2.25rem,4vw,3.5rem)]">
             <span class="text-sheen"
-              >{liveries.length + skinrs.designs.length} ways to wear it.</span
+              >{liveries.length + skinrs.designs.length} looks. Try them on.</span
             >
           </h2>
           <p class="reveal mb-10 max-w-md text-muted-foreground">
-            Every skin on Tranquility that recolors the {ship.name}{#if skinrs.designs.length}, and
-              the designs capsuleers made for it on the Paragon Hub{/if}.
+            Every skin CCP makes for the {ship.name}{#if skinrs.designs.length}, and every design
+              capsuleers have up for sale on the Paragon Hub{/if}. See it on the hull before you
+            spend a single PLEX.
           </p>
 
           <!-- The look on the ship, from either rail. -->
@@ -516,7 +519,7 @@
               {#if skinrDesign}
                 SKINR by <span class="text-foreground"
                   >{skinrDesign.creator.name ?? 'a capsuleer'}</span
-                >{#if skinrDesign.min_price_plex !== null}{` · ${plex.format(skinrDesign.min_price_plex)} PLEX`}{/if}
+                >{#if skinrDesign.min_price_plex !== null}{` · from ${plex.format(skinrDesign.min_price_plex)} PLEX`}{/if}
               {:else if skin}
                 In-game skin
               {:else}
@@ -571,9 +574,9 @@
         class="mx-auto max-w-[90rem] px-6 pt-[20vh] pb-24"
         use:chapterOf={'more'}
       >
-        <p class="reveal eyebrow mb-4" style:color={tint}>Keep exploring</p>
+        <p class="reveal eyebrow mb-4" style:color={tint}>Keep browsing</p>
         <h2 class="reveal display mb-14 text-[clamp(2.25rem,4vw,3.5rem)]">
-          <span class="text-sheen">Related ships.</span>
+          <span class="text-sheen">More hulls to dress up.</span>
         </h2>
         <div class="space-y-14">
           {#each rails as rail (rail.title)}
@@ -582,11 +585,11 @@
               note={rail.note}
               ships={rail.ships}
               {groupNames}
-              {raceNames}
+              {builderOf}
               {metaGroups}
               {factionLogos}
               showClass={rail.showClass ?? true}
-              onpick={(other) => (stage.morphId = other.id)}
+              onpick={leapTo}
             />
           {/each}
         </div>

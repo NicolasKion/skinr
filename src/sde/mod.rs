@@ -86,6 +86,9 @@ pub struct Faction {
     pub description: String,
     /// The SDE's `shortDescription`, a one-line motto; many factions have none.
     pub tagline: Option<String>,
+    /// The race this faction is the home empire of: one with a militia of
+    /// its own and a single member race (Amarr, Caldari, Gallente, Minmatar).
+    pub empire_of: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

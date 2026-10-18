@@ -24,6 +24,23 @@ export interface CameraPose {
  */
 export const THUMBNAIL_POSE = { yaw: REST_YAW, pitch: REST_PITCH };
 
+/**
+ * How a thumbnail is framed. A first look takes the bounding sphere with
+ * `margin` room (spheres are loose, so this only has to keep the hull in
+ * frame); then the view closes in on the hull's own pixels (those at least
+ * `solid` opaque), made square and padded by `padding`. The renderer frames
+ * a ship the same way to pin it over its thumbnail.
+ */
+export const THUMBNAIL_FRAMING = { margin: 1.25, padding: 1.06, solid: 8 };
+
+/** A rectangle on screen, in CSS pixels from the viewport's top left. */
+export interface ScreenRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** The three-quarter hero view, slowly spinning. */
 export const HERO_POSE: CameraPose = { pitch: REST_PITCH };
 
