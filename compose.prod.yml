@@ -1,0 +1,113 @@
+# Production, a Coolify Docker Compose resource (this file), deployed
+# from the images .github/workflows/release.yml pushes to GHCR on every
+# merge to main.
+#
+# Only skinr-proxy gets a domain: in Coolify set its "Domains" to
+# https://skinr.space,https://www.skinr.space and leave the rest without
+# one; the proxy redirects www to the apex. Traefik terminates TLS and
+# hands plain HTTP to the proxy on :80, which routes to the api and the
+# frontend (deploy/Caddyfile).
+#
+# The api and the SDE import join Coolify's external `coolify` network to
+# reach the shared Postgres (DATABASE_URL). Other apps share that network,
+# so every service carries the app prefix. The import runs before the api
+# on every deploy and only reseeds when CCP published a new SDE build; the
+# api runs the migrations on startup.
+#
+# Ship thumbnails are rendered on a machine with a GPU
+# (frontend/scripts/render-thumbnails.ts) and live on the external
+# skinr_thumbnails volume. Create it once and copy them in:
+#   docker volume create skinr_thumbnails
+#   rsync -a storage/thumbnails/ root@<server>:/var/lib/docker/volumes/skinr_thumbnails/_data/
+#
+# Coolify fills in the ${VAR}s from the resource's environment variables:
+# DATABASE_URL is required, the rest have the app's defaults.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  skinr-sde-import:
+    image: ghcr.io/nicolaskion/skinr-api:latest
+    pull_policy: always
+    command: ["sde_import"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?}
+      SDE_FORCE: ${SDE_FORCE:-0}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - sde-cache:/app/storage/sde
+    networks:
+      - default
+      - coolify
+    restart: "no"
+    # A one-shot job: Coolify should not wait for it to stay up.
+    exclude_from_hc: true
+    logging: *logging
+
+  skinr-api:
+    image: ghcr.io/nicolaskion/skinr-api:latest
+    pull_policy: always
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?}
+      BIND_ADDR: 0.0.0.0:3100
+      RUST_LOG: ${RUST_LOG:-info}
+      ESI_USER_AGENT: ${ESI_USER_AGENT:-skinr.space/0.1 (+https://skinr.space)}
+      ESI_SYNC: ${ESI_SYNC:-1}
+    volumes:
+      - thumbnails:/app/storage/thumbnails:ro
+    depends_on:
+      skinr-sde-import:
+        condition: service_completed_successfully
+    # The image has no curl or wget; bash talks HTTP to /api/health itself.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/127.0.0.1/3100 && printf 'GET /api/health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200 '"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - default
+      - coolify
+    restart: unless-stopped
+    logging: *logging
+
+  skinr-frontend:
+    image: ghcr.io/nicolaskion/skinr-frontend:latest
+    pull_policy: always
+    environment:
+      AXUM_URL: http://skinr-api:3100
+      ORIGIN: ${APP_URL:-https://skinr.space}
+    depends_on:
+      - skinr-api
+    restart: unless-stopped
+    logging: *logging
+
+  skinr-proxy:
+    image: ghcr.io/nicolaskion/skinr-proxy:latest
+    pull_policy: always
+    environment:
+      API_HOST: skinr-api
+      FRONTEND_HOST: skinr-frontend
+    depends_on:
+      - skinr-api
+      - skinr-frontend
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  coolify:
+    external: true
+
+volumes:
+  sde-cache:
+  thumbnails:
+    external: true
+    name: skinr_thumbnails

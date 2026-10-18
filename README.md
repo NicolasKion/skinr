@@ -1,14 +1,37 @@
 # skinr.space
 
-Browse every ship in EVE Online and view it in 3D in the browser, in any of
-its liveries. Ships are built from the game's own data: the Static Data
-Export (SDE) says which Space Object Factory hull, faction and race make up
-each ship and skin, and [CarbonEngineJS](https://github.com/carbonenginejs/runtime)
-builds and renders them with EVE's shaders on WebGPU.
+[![CI](https://github.com/NicolasKion/skinr/actions/workflows/ci.yml/badge.svg)](https://github.com/NicolasKion/skinr/actions/workflows/ci.yml)
+[![Release](https://github.com/NicolasKion/skinr/actions/workflows/release.yml/badge.svg)](https://github.com/NicolasKion/skinr/actions/workflows/release.yml)
+[![Rust](https://img.shields.io/badge/Rust-Axum-DEA584?logo=rust&logoColor=white)](https://github.com/tokio-rs/axum)
+[![SvelteKit](https://img.shields.io/badge/SvelteKit-Svelte%205-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev/docs/kit)
+[![WebGPU](https://img.shields.io/badge/WebGPU-CarbonEngineJS-005A9C)](https://github.com/carbonenginejs/runtime)
 
-A Rust JSON API (Axum, Postgres via sqlx) and a SvelteKit frontend, the same
-setup as MutaMarket. Everything runs on one origin: Caddy (or the Vite dev
-proxy) sends `/api` and `/cdn` to Axum and every page to SvelteKit.
+Try on EVE Online ship skins on the real hull in 3D, right in the browser:
+the in-game ones and the SKINR designs capsuleers have up for sale on the
+Paragon Hub.
+
+## Features
+
+- Every ship in the game, grouped by class and by who builds it (the empires
+  and the pirate and faction builders), straight from the SDE
+- Each hull rendered with EVE's own shaders on WebGPU by
+  [CarbonEngineJS](https://github.com/carbonenginejs/runtime), with every
+  skin to try on it
+- SKINR designs on sale, synced from ESI every 10 minutes, with their price
+- A blueprint sheet per ship (side, top and front elevations) and its stats
+- Related ships to jump to, with the 3D ship popping out of its card
+
+## Stack
+
+- API: Rust, [Axum](https://github.com/tokio-rs/axum) and
+  [sqlx](https://github.com/launchbadge/sqlx) on Postgres. Ship and skin data
+  come from CCP's Static Data Export, SKINR listings from ESI, and game files
+  through a `/cdn` passthrough to CCP's client CDNs.
+- Frontend: [SvelteKit](https://svelte.dev/docs/kit) (adapter-node), Svelte 5
+  and Tailwind CSS 4
+
+One origin serves both: Caddy (or the Vite dev proxy) sends `/api` and `/cdn`
+to Axum and every page to SvelteKit.
 
 ## Run it
 
@@ -43,7 +66,16 @@ cd frontend && npm install && npm run dev -- --port 5200
   design). `src/lib/viewer/` holds the WebGPU renderer and the shared engine;
   `src/lib/components/stage.svelte` is the persistent 3D stage that moves between the
   ship hero and the explorer's dock.
-- `deploy/Caddyfile.dev` the shared-origin routing in docker.
+- `deploy/Caddyfile` the shared-origin routing, local and in production.
+
+## Deploy
+
+Production runs on Coolify from `compose.prod.yml`. Every merge to main
+builds the api, frontend and proxy images, pushes them to GHCR and calls the
+Coolify deploy webhook (`COOLIFY_WEBHOOK` and `COOLIFY_TOKEN` repo secrets).
+The SDE import runs before the api on each deploy. Thumbnails are rendered
+locally and synced to the `skinr_thumbnails` volume (see the top of
+`compose.prod.yml`).
 
 ## Checks
 

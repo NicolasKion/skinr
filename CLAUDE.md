@@ -1,7 +1,7 @@
 # skinr.space
 
-Browse and view EVE Online ships in 3D. A Rust API (Axum + Postgres via sqlx)
-serving JSON plus a `/cdn` passthrough to CCP's client CDNs, and a SvelteKit
+Try on EVE Online ship skins (the in-game ones and SKINR designs on sale)
+on the real hull in 3D. A Rust API (Axum + Postgres via sqlx) serving JSON plus a `/cdn` passthrough to CCP's client CDNs, and a SvelteKit
 frontend in `frontend/` (SSR, adapter-node, Tailwind v4, shadcn-svelte). The
 setup mirrors MutaMarket (`../MutaMarket`): when in doubt about structure,
 theme or tooling, do what it does.
@@ -9,7 +9,7 @@ theme or tooling, do what it does.
 ## Rules
 
 - One origin: the Vite dev proxy (`frontend/proxy-paths.ts`) and
-  `deploy/Caddyfile.dev` route `/api` and `/cdn` to Axum. Keep them in sync and
+  `deploy/Caddyfile` route `/api` and `/cdn` to Axum. Keep them in sync and
   never point the browser at Axum's port.
 - Ship data comes from the native SDE import (`cargo run --bin sde_import`),
   never hand-written fixtures in production.

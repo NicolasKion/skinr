@@ -1,11 +1,31 @@
-# The composed shared origin on :5200: API and CDN paths go to the API
-# container, everything else to the SvelteKit node server. Keep the prefix
-# list in sync with frontend/proxy-paths.ts.
+# The shared origin, in production (the proxy image, deploy/Dockerfile,
+# behind Coolify's Traefik, which terminates TLS) and in the local stack
+# (docker-compose.yml, published on :5200). API and CDN paths go to the
+# api, everything else to the SvelteKit node server. Keep the prefix list
+# in sync with frontend/proxy-paths.ts.
+#
+# API_HOST and FRONTEND_HOST name the upstreams; production sets them to
+# the prefixed service names, the local stack keeps the defaults.
+{
+	# Traefik in front: keep its X-Forwarded-* headers.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
 
-:5200 {
+:80 {
+	# www.skinr.space, routed here too, redirects to the apex.
+	@www header_regexp www Host ^www\.(.+)$
+	redir @www https://{re.www.1}{uri} permanent
+
 	encode zstd gzip
-	@axum path /api/* /cdn/*
-	reverse_proxy @axum api:3100
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
 
-	reverse_proxy frontend:3000
+	@axum path /api/* /cdn/*
+	reverse_proxy @axum {$API_HOST:api}:3100
+
+	reverse_proxy {$FRONTEND_HOST:frontend}:3000
 }

@@ -1,17 +1,72 @@
 name: CI
 
+# Pull requests and the merge queue only, and only the jobs a change can
+# affect. Pushes to main just keep the build caches warm, so pull requests
+# start from them (GitHub shares caches from the base branch only).
 on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
   push:
     branches: [main]
-  pull_request:
+    paths:
+      - Cargo.lock
+      - rust-toolchain.toml
+      - Dockerfile
+      - frontend/Dockerfile
+      - frontend/package-lock.json
+      - .github/workflows/ci.yml
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+
 jobs:
+  changes:
+    name: Changes
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      proxy: ${{ steps.filter.outputs.proxy }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            workflow: &workflow
+              - .github/workflows/ci.yml
+            rust:
+              - *workflow
+              - "src/**"
+              - "tests/**"
+              - "migrations/**"
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+            frontend:
+              - *workflow
+              - "frontend/**"
+            proxy:
+              - *workflow
+              - "deploy/**"
+
   rust:
     name: Rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -19,15 +74,20 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test
-        run: cargo test --all-targets
+        run: cargo test --all-targets --locked
 
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -41,6 +101,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install
         run: npm ci
+      # Some vitest suites run in a real browser.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium
       - name: Types
@@ -51,3 +117,55 @@ jobs:
         run: npm run format:check
       - name: Test
         run: npm test
+
+  # The production proxy image builds and its Caddyfile parses.
+  proxy:
+    name: Proxy
+    needs: changes
+    if: needs.changes.outputs.proxy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image
+        run: docker build -t proxy deploy
+      - name: Validate the Caddyfile
+        run: docker run --rm proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+  # Fills the caches on main whenever what they hold changes.
+  warm-cache:
+    name: Warm caches
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust
+      - name: Build
+        run: cargo build --all-targets --locked
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the images
+        uses: docker/bake-action@v7
+        with:
+          files: docker-compose.yml
+          targets: api,frontend
+          set: |
+            api.cache-from=type=gha,scope=api
+            api.cache-to=type=gha,scope=api,mode=max
+            frontend.cache-from=type=gha,scope=frontend
+            frontend.cache-to=type=gha,scope=frontend,mode=max
+
+  # The one check to require: passes when every job a change needed passed,
+  # skipped jobs included.
+  ci:
+    name: CI
+    if: always() && github.event_name != 'push'
+    needs: [changes, rust, frontend, proxy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        run: |
+          echo '${{ toJSON(needs) }}' | jq -e 'all(.[]; .result == "success" or .result == "skipped")'
