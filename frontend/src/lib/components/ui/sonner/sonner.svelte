@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Diverges from the stock shadcn wrapper: the theme comes from $lib/theme
+  // Diverges from the stock shadcn wrapper: the theme comes from #lib/theme
   // (a cookie the server reads), not mode-watcher.
   import { Toaster as Sonner, type ToasterProps as SonnerProps } from 'svelte-sonner';
   import Loader2Icon from '@lucide/svelte/icons/loader-2';
@@ -7,7 +7,7 @@
   import OctagonXIcon from '@lucide/svelte/icons/octagon-x';
   import InfoIcon from '@lucide/svelte/icons/info';
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
-  import { theme } from '$lib/theme.svelte';
+  import { theme } from '#lib/theme.svelte.js';
 
   let { ...restProps }: SonnerProps = $props();
 </script>

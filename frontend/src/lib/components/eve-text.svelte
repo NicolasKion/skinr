@@ -2,7 +2,7 @@
   // EVE HTML as the API hands it over: styled segments, rendered as text
   // nodes and plain elements only (never {@html}), with links to ship pages.
   // `reveal` wraps every word so it lights up as the reader scrolls past.
-  import type { RichSegment } from '$lib/types';
+  import type { RichSegment } from '#lib/types.js';
 
   let { segments, reveal = false }: { segments: RichSegment[]; reveal?: boolean } = $props();
 

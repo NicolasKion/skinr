@@ -5,8 +5,8 @@
   // where they are; the arrow buttons page through a few at a time.
   import type { Snippet } from 'svelte';
   import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-  import * as Carousel from '$lib/components/ui/carousel';
-  import type { CarouselAPI } from '$lib/components/ui/carousel/context';
+  import * as Carousel from '#lib/components/ui/carousel/index.js';
+  import type { CarouselAPI } from '#lib/components/ui/carousel/context.js';
 
   let {
     label,

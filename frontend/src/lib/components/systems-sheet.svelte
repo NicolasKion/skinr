@@ -1,8 +1,8 @@
 <script lang="ts">
   // Capacitor, targeting and navigation as parts-list rows, each with the
   // game's icon for the attribute behind it.
-  import SpecRow from '$lib/components/spec-row.svelte';
-  import type { Sheet } from '$lib/types';
+  import SpecRow from '#lib/components/spec-row.svelte';
+  import type { Sheet } from '#lib/types.js';
 
   let { sheet }: { sheet: Sheet } = $props();
 

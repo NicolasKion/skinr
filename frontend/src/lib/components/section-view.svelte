@@ -4,9 +4,9 @@
   // `key`, hosted here, while the main stage stays docked in the blueprint
   // above. It renders only while near the screen. Dragging it turns the ship.
   import { onMount } from 'svelte';
-  import { getEngine } from '$lib/viewer/engine';
-  import type { CameraPose } from '$lib/viewer/poses';
-  import type { ShipRenderer } from '$lib/viewer/renderer';
+  import { getEngine } from '#lib/viewer/engine.js';
+  import type { CameraPose } from '#lib/viewer/poses.js';
+  import type { ShipRenderer } from '#lib/viewer/renderer.js';
 
   let {
     key,

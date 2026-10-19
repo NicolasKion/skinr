@@ -11,10 +11,10 @@
   // ship's race color, deep in the dark theme and faint in the light one,
   // with its faction's emblem watermarked behind it.
   import type { Snippet } from 'svelte';
-  import FactionEmblem from '$lib/components/faction-emblem.svelte';
-  import GameImage from '$lib/components/game-image.svelte';
-  import { raceTint, typeRender } from '$lib/eve';
-  import { theme } from '$lib/theme.svelte';
+  import FactionEmblem from '#lib/components/faction-emblem.svelte';
+  import GameImage from '#lib/components/game-image.svelte';
+  import { raceTint, typeRender } from '#lib/eve.js';
+  import { theme } from '#lib/theme.svelte.js';
 
   let {
     id,

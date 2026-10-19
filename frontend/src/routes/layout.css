@@ -11,8 +11,8 @@
 @custom-variant dark (&:is(.dark *));
 
 /* Dark by default: near-black surfaces, white type, and one accent that
-   pages tint per race through --tint (see $lib/eve raceTint). The light
-   theme (html.light, $lib/theme) swaps the same tokens; components draw with
+   pages tint per race through --tint (see #lib/eve raceTint). The light
+   theme (html.light, #lib/theme) swaps the same tokens; components draw with
    the tokens, never with white or black, so both themes follow. A surface
    that is dark in either theme (the blueprint paper) takes .theme-dark. */
 :root,

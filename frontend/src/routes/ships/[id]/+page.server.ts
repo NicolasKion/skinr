@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
-import { apiGet } from '$lib/server/api';
-import type { ShipDetail, ShipSkinrs } from '$lib/types';
+import { apiGet } from '#lib/server/api.js';
+import type { ShipDetail, ShipSkinrs } from '#lib/types.js';
 import type { PageServerLoad } from './$types';
 
 /** What the page shows when the SKINR designs cannot be loaded. */

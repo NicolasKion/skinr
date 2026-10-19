@@ -2,8 +2,8 @@
   // What went wrong with the ship on stage, as a Photon alert: it could not
   // be built at all, or it was built with client files missing. Shown while
   // the stage glitches; nothing when the ship is fine.
-  import PhotonAlert from '$lib/components/photon-alert.svelte';
-  import { stage } from '$lib/stage.svelte';
+  import PhotonAlert from '#lib/components/photon-alert.svelte';
+  import { stage } from '#lib/stage.svelte.js';
 
   let { name, class: className = '' }: { name: string; class?: string } = $props();
 </script>

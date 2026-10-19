@@ -4,9 +4,9 @@
   // are known, so it stays sharp at any size: a ship's standard issue, a
   // player's SKINR design, and in-game skins whose colors the import read off
   // their icon. Only a skin without them falls back to the client's 64 px icon.
-  import SkinHexagon from '$lib/components/skin-hexagon.svelte';
-  import type { IconPattern } from '$lib/skinr';
-  import type { Colors, IconColors } from '$lib/types';
+  import SkinHexagon from '#lib/components/skin-hexagon.svelte';
+  import type { IconPattern } from '#lib/skinr.js';
+  import type { Colors, IconColors } from '#lib/types.js';
 
   let {
     iconUrl = null,

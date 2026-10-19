@@ -82,7 +82,8 @@ services:
     pull_policy: always
     environment:
       AXUM_URL: http://skinr-api:3100
-      ORIGIN: ${APP_URL:-https://skinr.space}
+      # Traefik terminates TLS; Caddy passes on its X-Forwarded-Proto.
+      PROTOCOL_HEADER: x-forwarded-proto
     depends_on:
       - skinr-api
     restart: unless-stopped

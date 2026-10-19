@@ -2,7 +2,7 @@
   // One line of a spec table: the attribute's game icon, its label, a dotted
   // leader, then the unit and the figure in columns of their own, so figures
   // in a list line up on their last digit.
-  import AttributeIcon from '$lib/components/attribute-icon.svelte';
+  import AttributeIcon from '#lib/components/attribute-icon.svelte';
 
   let {
     icon,

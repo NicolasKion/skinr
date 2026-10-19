@@ -8,15 +8,15 @@
   // the rest of the sheet constructs itself around it. Section 05 names the
   // faction that builds the ship; it stays out of the drawing so a slim hull's
   // front view keeps its own width.
-  import BonusList from '$lib/components/bonus-list.svelte';
-  import DrawnZone from '$lib/components/drawn-zone.svelte';
-  import DefenseTable from '$lib/components/defense-table.svelte';
-  import FittingSheet from '$lib/components/fitting-sheet.svelte';
-  import SystemsSheet from '$lib/components/systems-sheet.svelte';
-  import { dockTarget } from '$lib/stage.svelte';
-  import { TRANSITION_MS } from '$lib/viewer/poses';
-  import type { Blueprint } from '$lib/viewer/renderer';
-  import type { ShipDetail } from '$lib/types';
+  import BonusList from '#lib/components/bonus-list.svelte';
+  import DrawnZone from '#lib/components/drawn-zone.svelte';
+  import DefenseTable from '#lib/components/defense-table.svelte';
+  import FittingSheet from '#lib/components/fitting-sheet.svelte';
+  import SystemsSheet from '#lib/components/systems-sheet.svelte';
+  import { dockTarget } from '#lib/stage.svelte.js';
+  import { TRANSITION_MS } from '#lib/viewer/poses.js';
+  import type { Blueprint } from '#lib/viewer/renderer.js';
+  import type { ShipDetail } from '#lib/types.js';
 
   let {
     ship,

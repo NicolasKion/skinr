@@ -1,12 +1,12 @@
 <script lang="ts">
   import './layout.css';
   import { onNavigate } from '$app/navigation';
-  import BootScreen from '$lib/components/boot-screen.svelte';
-  import ShipLeap from '$lib/components/ship-leap.svelte';
-  import SiteBar from '$lib/components/site-bar.svelte';
-  import Stage from '$lib/components/stage.svelte';
-  import { leap } from '$lib/leap.svelte';
-  import { stage } from '$lib/stage.svelte';
+  import BootScreen from '#lib/components/boot-screen.svelte';
+  import ShipLeap from '#lib/components/ship-leap.svelte';
+  import SiteBar from '#lib/components/site-bar.svelte';
+  import Stage from '#lib/components/stage.svelte';
+  import { leap } from '#lib/leap.svelte.js';
+  import { stage } from '#lib/stage.svelte.js';
 
   let { children } = $props();
 
@@ -14,6 +14,8 @@
   // the page cross-fades and elements sharing a view-transition-name (a
   // ship's name on a card and as the hero title) morph from one to the other.
   onNavigate((navigation) => {
+    if (navigation.shallow && navigation.type === 'goto') return;
+
     if (!document.startViewTransition || navigation.from?.url.href === navigation.to?.url.href) {
       return;
     }

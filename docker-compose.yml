@@ -82,7 +82,6 @@ services:
     build: ./frontend
     environment:
       AXUM_URL: http://api:3100
-      ORIGIN: http://localhost:5200
     depends_on:
       - api
     restart: unless-stopped

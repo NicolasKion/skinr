@@ -5,9 +5,9 @@
   // view, and its reset button; last the theme switch. The bar never changes
   // shape while scrolling.
   import { ChevronRight, Moon, RotateCcw, Sun } from '@lucide/svelte';
-  import Logo from '$lib/components/logo.svelte';
-  import { nav } from '$lib/nav.svelte';
-  import { theme } from '$lib/theme.svelte';
+  import Logo from '#lib/components/logo.svelte';
+  import { nav } from '#lib/nav.svelte.js';
+  import { theme } from '#lib/theme.svelte.js';
 
   let links = $state<Record<string, HTMLAnchorElement>>({});
   const pill = $derived.by(() => {
