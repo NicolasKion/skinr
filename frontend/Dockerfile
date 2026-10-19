@@ -1,6 +1,6 @@
 # The SvelteKit node server (adapter-node build).
 
-FROM node:22-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -11,7 +11,7 @@ RUN npm run build
 # devDependency into build/, and packages listed under dependencies
 # would be left external, so the app keeps all of them under
 # devDependencies.
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/build build
