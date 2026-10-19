@@ -1,7 +1,7 @@
 <script lang="ts">
   // Each in-game SKIN icon (left) next to our vector redraw (right), to judge
   // the redraw against the original. `?ships=1,2,3` picks the hulls.
-  import SkinHexagon from '$lib/components/skin-hexagon.svelte';
+  import SkinHexagon from '#lib/components/skin-hexagon.svelte';
 
   let { data } = $props();
 

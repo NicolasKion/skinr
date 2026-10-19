@@ -123,7 +123,7 @@ class Stage {
   /** Which side the next livery of the same ship slides in from. */
   direction: 1 | -1 = 1;
   /**
-   * A leap to another ship ($lib/leap.svelte.ts): the stage covers the
+   * A leap to another ship (#lib/leap.svelte.ts): the stage covers the
    * viewport and builds the next ship pinned over its card's picture at
    * `rect`, out of sight until `shown`.
    */

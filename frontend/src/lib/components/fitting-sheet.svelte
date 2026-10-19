@@ -1,9 +1,9 @@
 <script lang="ts">
   // The fitting window's left half: slot racks as drafted bays, hardpoints,
   // and the resources a fit spends.
-  import AttributeIcon from '$lib/components/attribute-icon.svelte';
-  import SpecRow from '$lib/components/spec-row.svelte';
-  import type { Sheet } from '$lib/types';
+  import AttributeIcon from '#lib/components/attribute-icon.svelte';
+  import SpecRow from '#lib/components/spec-row.svelte';
+  import type { Sheet } from '#lib/types.js';
 
   let { sheet }: { sheet: Sheet } = $props();
 

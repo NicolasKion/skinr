@@ -4,10 +4,10 @@
   // section's own view of the ship over them, at half the chapter's height.
   // Beside the text (wide screens) the ship sits right of centre like the
   // stage's RIGHT placement.
-  import FactionEmblem from '$lib/components/faction-emblem.svelte';
-  import SectionView from '$lib/components/section-view.svelte';
-  import type { StagePlacement } from '$lib/stage.svelte';
-  import type { CameraPose } from '$lib/viewer/poses';
+  import FactionEmblem from '#lib/components/faction-emblem.svelte';
+  import SectionView from '#lib/components/section-view.svelte';
+  import type { StagePlacement } from '#lib/stage.svelte.js';
+  import type { CameraPose } from '#lib/viewer/poses.js';
 
   let {
     key,

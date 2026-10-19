@@ -1,5 +1,5 @@
-import { browser } from '$app/environment';
-import { THEME_COOKIE, THEME_MAX_AGE, type Theme } from '$lib/theme';
+import { browser } from '$app/env';
+import { THEME_COOKIE, THEME_MAX_AGE, type Theme } from '#lib/theme.js';
 
 // The theme in effect. The server already put it on <html> as a class
 // (hooks.server.ts), so the client starts from there.

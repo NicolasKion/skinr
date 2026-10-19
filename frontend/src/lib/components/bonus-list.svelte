@@ -1,7 +1,7 @@
 <script lang="ts">
   // A ship's bonuses as the game lists them: per skill level, then role.
-  import EveText from '$lib/components/eve-text.svelte';
-  import type { BonusGroup } from '$lib/types';
+  import EveText from '#lib/components/eve-text.svelte';
+  import type { BonusGroup } from '#lib/types.js';
 
   let { groups }: { groups: BonusGroup[] } = $props();
 </script>

@@ -15,8 +15,8 @@
   // their boundary points, so they stitch together without gaps, and
   // everything a section shows (tint, patterns, shading, stripes, lights) is
   // clipped to it, so nothing spills into the next one.
-  import type { IconPattern } from '$lib/skinr';
-  import type { Colors } from '$lib/types';
+  import type { IconPattern } from '#lib/skinr.js';
+  import type { Colors } from '#lib/types.js';
 
   let {
     colors,

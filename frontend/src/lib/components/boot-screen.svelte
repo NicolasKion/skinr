@@ -6,8 +6,8 @@
   // waits behind this (app.html's data-booting holds its animations, see
   // layout.css), then everything starts at once, smoothly.
   import { fade } from 'svelte/transition';
-  import Logo from '$lib/components/logo.svelte';
-  import { stage } from '$lib/stage.svelte';
+  import Logo from '#lib/components/logo.svelte';
+  import { stage } from '#lib/stage.svelte.js';
 
   /** How long the screen takes to lift, in ms. */
   const LIFT_MS = 700;

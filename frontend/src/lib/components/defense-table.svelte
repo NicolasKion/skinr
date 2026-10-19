@@ -1,8 +1,8 @@
 <script lang="ts">
   // The three defense layers as a table: hit points, then one column per
   // damage type with the game's resist icon and color.
-  import AttributeIcon from '$lib/components/attribute-icon.svelte';
-  import type { Sheet } from '$lib/types';
+  import AttributeIcon from '#lib/components/attribute-icon.svelte';
+  import type { Sheet } from '#lib/types.js';
 
   let { sheet }: { sheet: Sheet } = $props();
 

@@ -15,7 +15,7 @@ theme or tooling, do what it does.
   never hand-written fixtures in production.
 - SDE text (descriptions and anything else from the game) is EVE HTML, not HTML.
   Store it raw; render it only through `src/eve_html.rs` (plain text, or styled
-  segments the frontend draws with `$lib/components/eve-text.svelte`), never
+  segments the frontend draws with `#lib/components/eve-text.svelte`), never
   `{@html}`. That module follows CCP's guide
   (https://developers.eveonline.com/docs/guides/eve-html/): four entities only,
   significant whitespace, crossing and unclosed tags, alpha-first colors.
@@ -27,12 +27,12 @@ theme or tooling, do what it does.
   dark by default with a light theme, Inter, generous radii, a per-race `--tint`,
   `glass`/`display`/`reveal` utilities, borderless surfaces (no boxed cards).
   Motion uses `--ease-apple`.
-- Themes: `$lib/theme` keeps the choice in a cookie that `hooks.server.ts`
+- Themes: `#lib/theme` keeps the choice in a cookie that `hooks.server.ts`
   turns into the class on `<html>` (`dark` or `light`), so there is no flash.
   Components use the tokens in `layout.css` (`foreground`, `--glass`,
   `--shadow`, ...), never raw white or black. Surfaces that stay dark in both
   themes (the blueprint paper) take `.theme-dark`.
-- One shared 3D stage (`$lib/stage.svelte.ts`, `$lib/components/stage.svelte`)
+- One shared 3D stage (`#lib/stage.svelte.ts`, `#lib/components/stage.svelte`)
   lives in the root layout at z-10 with a transparent canvas. Pages set its mode
   (hero, dock, hidden) and ship; UI that must sit above it uses z-20, anything
   behind it (the ship page's background type) sits at z-0. Never resize the canvas
@@ -40,12 +40,12 @@ theme or tooling, do what it does.
 - From the blueprint chapter down the stage docks into the sheet's side
   elevation (`stage.blueprintFit` frames it at the drawing's scale) and stays
   there. The livery chapter shows its own view of the same ship instead (see
-  the section views below), with two rails (`$lib/components/skin-rail.svelte`):
+  the section views below), with two rails (`#lib/components/skin-rail.svelte`):
   the game's skins and the players' SKINR designs.
 - The chapter effect on the ship page alone sets `stage.mode`.
-- The site bar (`$lib/components/site-bar.svelte`) lives in the root layout;
+- The site bar (`#lib/components/site-bar.svelte`) lives in the root layout;
   pages put their breadcrumb, section links and reset action into
-  `$lib/nav.svelte.ts` while mounted and clear it on the way out.
+  `#lib/nav.svelte.ts` while mounted and clear it on the way out.
 - Write `backdrop-filter` without a hand-written `-webkit-` twin: the build's
   CSS minifier then keeps only the prefixed one, which Chrome ignores. It adds
   the prefix itself.
@@ -53,17 +53,17 @@ theme or tooling, do what it does.
   to the section, not the section's own background: page content sits at z-20,
   above the stage, and would hide the docked ship.
 - Attribute icons on the sheet are the client's own (`/api/icons/{attribute}.png`,
-  fetched by the SDE import); use `$lib/components/attribute-icon.svelte`.
+  fetched by the SDE import); use `#lib/components/attribute-icon.svelte`.
 - Livery icons are the game's SKIN hexagon drawn as vectors
-  (`$lib/components/skin-hexagon.svelte`, shapes and shading traced from the
+  (`#lib/components/skin-hexagon.svelte`, shapes and shading traced from the
   client's 64 px layers), so they stay sharp. In-game skins use the colors the
   import reads back off their icon (`src/sde/skin_icon_colors.rs`), SKINR
   designs their materials' swatch colors plus their patterns; the 64 px icon
   (`/api/skins/{material}.png`) is only the fallback.
-  `$lib/components/skin-icon.svelte` picks.
+  `#lib/components/skin-icon.svelte` picks.
 - A resource read that fails is reported by the renderer (`onMissing`) and
   collected in `stage.missing`; a broken ship glitches (the same post pass,
-  `setGlitch`) and `$lib/components/stage-alert.svelte` says why. Runtime
+  `setGlitch`) and `#lib/components/stage-alert.svelte` says why. Runtime
   formats are opt-in: register any new one in `resMan.Register({ formats })`.
 - ESI goes through `src/esi/client.rs` only: it pins `COMPATIBILITY_DATE`
   (undated requests get the 2020 API, without SKINR), names the app and backs
@@ -72,10 +72,10 @@ theme or tooling, do what it does.
   names (`src/esi/skinr.rs`, every 10 min, `ESI_SYNC=0` turns it off); the SDE
   import adds the components and the faction slot mapping. The frontend turns
   a design into SOF DNA (`material?…`) plus a synthetic SOF pattern for its
-  projected layers (`$lib/skinr.ts`), registered with the engine before the
+  projected layers (`#lib/skinr.ts`), registered with the engine before the
   build (`stage.pattern`, `engine.registerPattern`).
 - Chapters with their own ship (the liveries) use
-  `$lib/components/section-stage.svelte`; each section view has a key and its
+  `#lib/components/section-stage.svelte`; each section view has a key and its
   own canvas and camera in the renderer (`sectionCanvas`, `setSectionView`).
 - The fitting window look is our own WebGPU pass (`frontend/src/lib/viewer/hologram.ts`)
   over the finished frame, not a runtime wireframe mode (WebGPU has none).

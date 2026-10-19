@@ -1,9 +1,9 @@
 <script lang="ts">
-  // The cover a leap to another ship runs under ($lib/leap.svelte.ts). While
+  // The cover a leap to another ship runs under (#lib/leap.svelte.ts). While
   // the ship loads over its card it only holds the page still; as the ship
   // pops out it fades the page away, and it lifts off the new page at the
   // end. Below the site bar (z-40) and the lifted stage, above the page.
-  import { LAND_MS, POP_MS, leap } from '$lib/leap.svelte';
+  import { LAND_MS, POP_MS, leap } from '#lib/leap.svelte.js';
 
   /** Keeps the page from scrolling under the card while its ship loads. */
   function holdScroll(node: HTMLElement) {

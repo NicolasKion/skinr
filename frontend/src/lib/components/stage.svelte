@@ -4,9 +4,9 @@
   // and masked with a rounded clip, both GPU-composited, so moving between
   // hero and dock is one smooth transform rather than a re-render at every size.
   import { onMount, untrack } from 'svelte';
-  import { stage } from '$lib/stage.svelte';
-  import type { Engine, ShowTransition } from '$lib/viewer/engine';
-  import { HERO_POSE, TRANSITION_MS, easeInOut } from '$lib/viewer/poses';
+  import { stage } from '#lib/stage.svelte.js';
+  import type { Engine, ShowTransition } from '#lib/viewer/engine.js';
+  import { HERO_POSE, TRANSITION_MS, easeInOut } from '#lib/viewer/poses.js';
 
   /**
    * How far the dock zooms in on the canvas, in dock widths per canvas width.
@@ -27,7 +27,7 @@
     let alive = true;
     stage.status = 'starting';
     const giveUp = setTimeout(() => (stage.booted = true), BOOT_TIMEOUT);
-    import('$lib/viewer/engine')
+    import('#lib/viewer/engine.js')
       .then(({ getEngine }) => getEngine((step) => (stage.engineStage = step)))
       .then((ready) => {
         if (!alive) return;

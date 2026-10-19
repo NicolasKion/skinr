@@ -2,29 +2,29 @@
   import { ChevronDown, LoaderCircle } from '@lucide/svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import Blueprint from '$lib/components/blueprint.svelte';
-  import EveText from '$lib/components/eve-text.svelte';
-  import FactionEmblem from '$lib/components/faction-emblem.svelte';
-  import GameImage from '$lib/components/game-image.svelte';
-  import SectionStage from '$lib/components/section-stage.svelte';
-  import SkinRail from '$lib/components/skin-rail.svelte';
-  import { skinrIcon, skinrLook } from '$lib/skinr';
-  import SheetMargin from '$lib/components/sheet-margin.svelte';
-  import ShipRail from '$lib/components/ship-rail.svelte';
-  import SkinIcon from '$lib/components/skin-icon.svelte';
-  import StageAlert from '$lib/components/stage-alert.svelte';
-  import { firstSentence, raceTint, shipBuilders, typeRender } from '$lib/eve';
-  import { leapTo } from '$lib/leap.svelte';
-  import { nav } from '$lib/nav.svelte';
-  import { CENTER, stage, type StagePlacement } from '$lib/stage.svelte';
+  import Blueprint from '#lib/components/blueprint.svelte';
+  import EveText from '#lib/components/eve-text.svelte';
+  import FactionEmblem from '#lib/components/faction-emblem.svelte';
+  import GameImage from '#lib/components/game-image.svelte';
+  import SectionStage from '#lib/components/section-stage.svelte';
+  import SkinRail from '#lib/components/skin-rail.svelte';
+  import { skinrIcon, skinrLook } from '#lib/skinr.js';
+  import SheetMargin from '#lib/components/sheet-margin.svelte';
+  import ShipRail from '#lib/components/ship-rail.svelte';
+  import SkinIcon from '#lib/components/skin-icon.svelte';
+  import StageAlert from '#lib/components/stage-alert.svelte';
+  import { firstSentence, raceTint, shipBuilders, typeRender } from '#lib/eve.js';
+  import { leapTo } from '#lib/leap.svelte.js';
+  import { nav } from '#lib/nav.svelte.js';
+  import { CENTER, stage, type StagePlacement } from '#lib/stage.svelte.js';
   import {
     BLUEPRINT_POSE,
     FRONT_POSE,
     HERO_POSE,
     SIDE_POSE,
     type CameraPose,
-  } from '$lib/viewer/poses';
-  import type { ShipSummary } from '$lib/types';
+  } from '#lib/viewer/poses.js';
+  import type { ShipSummary } from '#lib/types.js';
 
   let { data } = $props();
   const ship = $derived(data.ship);
@@ -67,11 +67,11 @@
     // list, or from the side an arrow key points (stepping wraps around).
     const order = liveries.map((livery) => livery.id);
     stage.direction = direction ?? (order.indexOf(id) >= order.indexOf(skinId) ? 1 : -1);
-    const url = new URL(page.url);
+    const url = new URL(page.url.href);
     url.searchParams.delete('skinr');
     if (id === null) url.searchParams.delete('skin');
     else url.searchParams.set('skin', String(id));
-    goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+    goto(url, { replace: true, reset: false });
     if (scrollTop) window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -84,10 +84,10 @@
     const order = skinrs.designs.map((candidate) => candidate.id);
     const current = skinrId === null ? -1 : order.indexOf(skinrId);
     stage.direction = direction ?? (order.indexOf(design.id) >= current ? 1 : -1);
-    const url = new URL(page.url);
+    const url = new URL(page.url.href);
     url.searchParams.delete('skin');
     url.searchParams.set('skinr', design.id);
-    goto(url, { replaceState: true, noScroll: true, keepFocus: true });
+    goto(url, { replace: true, reset: false });
   }
 
   /**
