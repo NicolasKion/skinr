@@ -8,12 +8,12 @@
 // process opens one studio and renders one ship at a time.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { create as createGpu, globals } from "webgpu";
-import type { Look } from "../../src/lib/viewer/lighting.ts";
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { create as createGpu, globals } from 'webgpu';
+import type { Look } from '../../src/lib/viewer/lighting.ts';
 
-export const THEMES = ["dark", "light"] as const;
+export const THEMES = ['dark', 'light'] as const;
 export type Theme = (typeof THEMES)[number];
 
 export interface StudioOptions {
@@ -47,7 +47,7 @@ export interface Studio {
 }
 
 /** The site's universe scene: sun, ambient and reflection maps. */
-const SCENE = "res:/dx9/scene/universe/c01_cube.red";
+const SCENE = 'res:/dx9/scene/universe/c01_cube.red';
 /** How often Blue is pumped while the scene loads. */
 const PUMP_INTERVAL_MS = 16;
 /**
@@ -69,15 +69,15 @@ const RANDOM_SEED = 1;
 const WARM_UP_UPDATES = 40;
 /** Gives up on a ship that is still loading after this many frames. */
 const MAX_FRAMES = 3000;
-const FORMAT = "rgba8unorm";
+const FORMAT = 'rgba8unorm';
 /** The feature the runtime cannot draw EVE's textures without. */
-const REQUIRED_FEATURE = "texture-compression-bc";
+const REQUIRED_FEATURE = 'texture-compression-bc';
 /** Features the runtime uses when the adapter has them. */
 const OPTIONAL_FEATURES = [
-  "texture-compression-bc-sliced-3d",
-  "float32-filterable",
-  "depth32float-stencil8",
-  "rg11b10ufloat-renderable",
+  'texture-compression-bc-sliced-3d',
+  'float32-filterable',
+  'depth32float-stencil8',
+  'rg11b10ufloat-renderable',
 ];
 
 /** Writes bytes aside and moves them into place, so a killed run never leaves half a file. */
@@ -94,7 +94,7 @@ async function writeAtomic(path: string, bytes: Uint8Array) {
 function installWebgpu(): GPU {
   Object.assign(globalThis, globals);
   const gpu = createGpu([]);
-  Object.defineProperty(navigator, "gpu", { value: gpu, configurable: true });
+  Object.defineProperty(navigator, 'gpu', { value: gpu, configurable: true });
   return gpu;
 }
 
@@ -117,36 +117,31 @@ async function cached(cache: string, url: string): Promise<Uint8Array> {
 /** Opens the game's file index and SOF, the runtime and a WebGPU device. */
 export async function openStudio(options: StudioOptions): Promise<Studio> {
   const { cache } = options;
-  const { blue } = await import("@carbonenginejs/runtime/blue");
-  const { CjsLibrary } = await import("@carbonenginejs/runtime/core");
-  const { CjsWebgpuFormat } =
-    await import("@carbonenginejs/runtime/resource/formats/webgpu");
-  await import("@carbonenginejs/runtime/trinity");
+  const { blue } = await import('@carbonenginejs/runtime/blue');
+  const { CjsLibrary } = await import('@carbonenginejs/runtime/core');
+  const { CjsWebgpuFormat } = await import('@carbonenginejs/runtime/resource/formats/webgpu');
+  await import('@carbonenginejs/runtime/trinity');
   // Ships carry sound emitters; the audio classes must exist to hydrate them.
-  await import("@carbonenginejs/runtime/audio/trinity");
-  const core = await import("@carbonenginejs/runtime/trinity/core");
-  const { EveSpaceScene } = await import("@carbonenginejs/runtime/trinity/eve");
-  const { EveSpaceSceneRenderDriver } =
-    await import("@carbonenginejs/runtime/trinity");
-  const { CjsWebgpuDevice } =
-    await import("@carbonenginejs/runtime/trinityal/webgpu");
+  await import('@carbonenginejs/runtime/audio/trinity');
+  const core = await import('@carbonenginejs/runtime/trinity/core');
+  const { EveSpaceScene } = await import('@carbonenginejs/runtime/trinity/eve');
+  const { EveSpaceSceneRenderDriver } = await import('@carbonenginejs/runtime/trinity');
+  const { CjsWebgpuDevice } = await import('@carbonenginejs/runtime/trinityal/webgpu');
   // Not in the runtime's package exports yet (see vite.config.ts); the path
   // resolves to the same module the public webgpu entry uses.
   const { CjsWebgpuRenderContextAL, CjsWebgpuRenderTarget } =
-    await import("../../node_modules/@carbonenginejs/runtime/dist/trinityal/webgpu/internal.js");
-  const { CjsFileIndexLibrary } =
-    await import("@carbonenginejs/runtime/tools/fileindex");
-  const { EveSOF } = await import("@carbonenginejs/runtime/sof");
-  const { random } = (await import("@carbonenginejs/runtime/math")).random;
-  const { encodePng } = await import("../../src/lib/viewer/png.ts");
-  const { placement } = await import("../../src/lib/viewer/placement.ts");
-  const { buildShip } = await import("../../src/lib/viewer/ship.ts");
-  const { alignBlockTextures } =
-    await import("../../src/lib/viewer/block-align.ts");
+    await import('../../node_modules/@carbonenginejs/runtime/dist/trinityal/webgpu/internal.js');
+  const { CjsFileIndexLibrary } = await import('@carbonenginejs/runtime/tools/fileindex');
+  const { EveSOF } = await import('@carbonenginejs/runtime/sof');
+  const { random } = (await import('@carbonenginejs/runtime/math')).random;
+  const { encodePng } = await import('../../src/lib/viewer/png.ts');
+  const { placement } = await import('../../src/lib/viewer/placement.ts');
+  const { buildShip } = await import('../../src/lib/viewer/ship.ts');
+  const { alignBlockTextures } = await import('../../src/lib/viewer/block-align.ts');
   const { STUDIO_LOOK, applyLighting, placeSun, takeLighting } =
-    await import("../../src/lib/viewer/lighting.ts");
+    await import('../../src/lib/viewer/lighting.ts');
   const { FIELD_OF_VIEW, THUMBNAIL_FRAMING, THUMBNAIL_POSE } =
-    await import("../../src/lib/viewer/poses.ts");
+    await import('../../src/lib/viewer/poses.ts');
   const looks: Record<Theme, Look> = {
     dark: options.looks?.dark ?? STUDIO_LOOK,
     light: options.looks?.light ?? STUDIO_LOOK,
@@ -156,25 +151,23 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   // The game client's file index and SOF, straight from CCP.
   const library = await CjsFileIndexLibrary.load(
     {
-      game: "Eve",
-      id: "ccp",
-      defaultBuildRef: "latest",
+      game: 'Eve',
+      id: 'ccp',
+      defaultBuildRef: 'latest',
       remote: {
-        metadataBaseURL: "https://binaries.eveonline.com",
-        indexBaseURL: "https://binaries.eveonline.com",
-        appBaseURL: "https://binaries.eveonline.com",
-        resBaseURL: "https://resources.eveonline.com",
+        metadataBaseURL: 'https://binaries.eveonline.com',
+        indexBaseURL: 'https://binaries.eveonline.com',
+        appBaseURL: 'https://binaries.eveonline.com',
+        resBaseURL: 'https://resources.eveonline.com',
       },
-      clients: { tranquility: { metadataToken: "TQ", aliases: ["tq"] } },
+      clients: { tranquility: { metadataToken: 'TQ', aliases: ['tq'] } },
     },
-    { build: "latest" },
+    { build: 'latest' },
   );
   const resolve = (path: string): string | null =>
     (
       library.Resolve(path) ??
-      (path.endsWith(".red")
-        ? library.Resolve(`${path.slice(0, -4)}.black`)
-        : null)
+      (path.endsWith('.red') ? library.Resolve(`${path.slice(0, -4)}.black`) : null)
     )?.sourceURL ?? null;
   /** res:/ paths the current ship could not read. */
   let missing: string[] = [];
@@ -218,23 +211,23 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
     resMan: { source: { Read: read }, useWorkerLoading: false },
     callbackMan: { useWorkers: false },
     effects: {
-      source: "dx11",
-      target: "webgpu",
+      source: 'dx11',
+      target: 'webgpu',
       translator: CjsWebgpuFormat,
-      permutations: "onDemand",
-      shaderModel: "high",
+      permutations: 'onDemand',
+      shaderModel: 'high',
     },
   }).Initialize({ sof, characterLibrary: null });
 
   const adapter = await installWebgpu().requestAdapter({
-    powerPreference: "high-performance",
+    powerPreference: 'high-performance',
   });
-  if (!adapter) throw new Error("No WebGPU adapter.");
+  if (!adapter) throw new Error('No WebGPU adapter.');
   if (!adapter.features.has(REQUIRED_FEATURE)) {
     throw new Error(`The WebGPU adapter lacks ${REQUIRED_FEATURE}.`);
   }
-  const requiredFeatures = [REQUIRED_FEATURE, ...OPTIONAL_FEATURES].filter(
-    (feature) => adapter.features.has(feature as GPUFeatureName),
+  const requiredFeatures = [REQUIRED_FEATURE, ...OPTIONAL_FEATURES].filter((feature) =>
+    adapter.features.has(feature as GPUFeatureName),
   );
   const webgpu = await CjsWebgpuDevice.Request({
     adapter,
@@ -244,7 +237,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   alignBlockTextures(device);
   /** WebGPU errors do not throw; a frame that hits one is dropped whole. */
   let gpuErrors: string[] = [];
-  device.addEventListener("uncapturederror", (event: any) => {
+  device.addEventListener('uncapturederror', (event: any) => {
     gpuErrors.push(event.error?.message ?? String(event.error));
   });
 
@@ -268,17 +261,14 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   const target = new CjsWebgpuRenderTarget(webgpu, {
     context,
     format: FORMAT,
-    depthFormat: "depth32float",
-    alphaMode: "premultiplied",
+    depthFormat: 'depth32float',
+    alphaMode: 'premultiplied',
   });
   // Clear depth (reverse-Z far is 0) and colour on each frame's first pass,
   // as renderer.ts does for the page.
   const create = target.CreateRenderPassDescriptor.bind(target);
   let lastFrame: unknown = null;
-  target.CreateRenderPassDescriptor = (
-    frame: unknown,
-    passOptions: any = {},
-  ) => {
+  target.CreateRenderPassDescriptor = (frame: unknown, passOptions: any = {}) => {
     if (frame !== lastFrame) {
       passOptions = {
         ...passOptions,
@@ -304,8 +294,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
     clientWidth: size,
     clientHeight: size,
   };
-  if (!tri.CreateSimpleDevice(canvas, size, size))
-    throw new Error("No Trinity device.");
+  if (!tri.CreateSimpleDevice(canvas, size, size)) throw new Error('No Trinity device.');
   // Effects that animate on the device's own clock (booster flicker) stay put.
   tri.animationTime = FIXED_TIME;
   tri.animationTimeScale = 0;
@@ -351,18 +340,17 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   driver.SetBatchManager(new core.CjsBatchManager().Initialize());
   tri.SetRenderJobs({
     RunUpdate: () => {},
-    Run: () =>
-      driver.Execute(null, null, FIXED_TIME, FIXED_TIME, null, renderContext),
+    Run: () => driver.Execute(null, null, FIXED_TIME, FIXED_TIME, null, renderContext),
   });
   placeSun(scene, THUMBNAIL_POSE.yaw, THUMBNAIL_POSE.pitch);
 
   {
     const resMan: any = blue.resMan;
-    for (const method of ["_GetResource", "_LoadObject"]) {
+    for (const method of ['_GetResource', '_LoadObject']) {
       const original = resMan[method].bind(resMan);
       resMan[method] = (path: unknown, ...rest: unknown[]) => {
         const name = String(path).toLowerCase();
-        if (name.startsWith("res:/") && !used.has(name)) {
+        if (name.startsWith('res:/') && !used.has(name)) {
           used.add(name);
           requests += 1;
         }
@@ -398,10 +386,8 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
    * the texture would still hold an older picture.
    */
   async function ready() {
-    if (!(await settle()))
-      throw new Error("still loading after the frame limit");
-    if (gpuErrors.length)
-      throw new Error(`GPU error: ${gpuErrors[0].slice(0, 200)}`);
+    if (!(await settle())) throw new Error('still loading after the frame limit');
+    if (gpuErrors.length) throw new Error(`GPU error: ${gpuErrors[0].slice(0, 200)}`);
   }
 
   /** Copies the last frame back as straight-alpha RGBA. */
@@ -413,11 +399,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     });
     const encoder = device.createCommandEncoder();
-    encoder.copyTextureToBuffer(
-      { texture: frameTexture! },
-      { buffer, bytesPerRow },
-      [size, size],
-    );
+    encoder.copyTextureToBuffer({ texture: frameTexture! }, { buffer, bytesPerRow }, [size, size]);
     device.queue.submit([encoder.finish()]);
     await buffer.mapAsync(GPUMapMode.READ);
     const padded = new Uint8Array(buffer.getMappedRange());
@@ -452,9 +434,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
         bottom = Math.max(bottom, y);
       }
     }
-    return right < 0
-      ? null
-      : { left, top, right: right + 1, bottom: bottom + 1 };
+    return right < 0 ? null : { left, top, right: right + 1, bottom: bottom + 1 };
   }
 
   async function png(pixels: Uint8ClampedArray) {
@@ -462,11 +442,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
     return new Uint8Array(await blob.arrayBuffer());
   }
 
-  async function render(
-    dna: string,
-    themes: readonly Theme[],
-    wanted = options.size,
-  ) {
+  async function render(dna: string, themes: readonly Theme[], wanted = options.size) {
     resize(wanted);
     missing = [];
     used.clear();
@@ -508,7 +484,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
       // A frame with the effects at their level (nothing is left to load).
       await ready();
       const box = hullBox(await readFrame());
-      if (!box) throw new Error("nothing was drawn");
+      if (!box) throw new Error('nothing was drawn');
 
       // Narrow the view onto that box, made square and padded: the same
       // camera, angle and perspective, only cropped to the hull.
@@ -516,10 +492,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
       const toPlane = (pixel: number) => (pixel / size) * 2 * half - half;
       const centerX = toPlane((box.left + box.right) / 2);
       const centerY = -toPlane((box.top + box.bottom) / 2);
-      const extent =
-        (Math.max(box.right - box.left, box.bottom - box.top) / size) *
-        half *
-        PADDING;
+      const extent = (Math.max(box.right - box.left, box.bottom - box.top) / size) * half * PADDING;
       projection.PerspectiveOffCenter(
         centerX - extent,
         centerX + extent,
@@ -529,7 +502,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
         far,
       );
 
-      const pngs: Shot["pngs"] = {};
+      const pngs: Shot['pngs'] = {};
       // Themes with the same look (by default they all have the studio's)
       // share one picture instead of each drawing it again.
       const drawn = new Map<Look, Uint8Array>();
