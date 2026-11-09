@@ -25,6 +25,8 @@ const MAX_DESIGNS_PER_RUN: usize = 1000;
 const NAMES_PER_REQUEST: usize = 500;
 /// The pause between the end of one run and the start of the next.
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// The listing state of a design that can be bought now.
+pub const LISTED: &str = "listed";
 /// Where the cursor is kept in `esi_sync_state`.
 const CURSOR_KEY: &str = "paragon_hub_skinr_after";
 /// The cursor value that means "from the beginning".
@@ -191,6 +193,21 @@ pub async fn sync(
     )
     .fetch_all(pool)
     .await?;
+    report.names = name_characters(pool, esi, &unnamed).await?;
+
+    Ok(report)
+}
+
+/// Fetches and stores the names of `ids` that have none yet; returns how many it stored.
+pub async fn name_characters(pool: &PgPool, esi: &EsiClient, ids: &[i64]) -> sqlx::Result<usize> {
+    let unnamed: Vec<i64> = sqlx::query_scalar(
+        "select id from unnest($1::bigint[]) as id
+         where id not in (select id from esi_characters)",
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await?;
+    let mut stored = 0;
     for name in fetch_names(esi, &unnamed).await {
         sqlx::query(
             "insert into esi_characters (id, name) values ($1, $2)
@@ -200,10 +217,38 @@ pub async fn sync(
         .bind(&name.name)
         .execute(pool)
         .await?;
-        report.names += 1;
+        stored += 1;
     }
+    Ok(stored)
+}
 
-    Ok(report)
+/// Fetches and stores the designs of `ids` that are not stored yet (a
+/// design never changes), at most `limit` of them; returns how many it stored.
+pub async fn fetch_missing_designs(
+    pool: &PgPool,
+    esi: &EsiClient,
+    ids: &[String],
+    limit: usize,
+) -> sqlx::Result<usize> {
+    let missing: Vec<String> = sqlx::query_scalar(
+        "select id from unnest($1::text[]) as id
+         where id not in (select id from skinr_designs) limit $2",
+    )
+    .bind(ids)
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await?;
+    let mut stored = 0;
+    for skinr_id in missing {
+        match fetch_design(esi, &skinr_id).await {
+            Ok(design) => {
+                store_design(pool, &design).await?;
+                stored += 1;
+            }
+            Err(error) => tracing::warn!(%error, %skinr_id, "could not fetch a SKINR design"),
+        }
+    }
+    Ok(stored)
 }
 
 async fn store_listing(pool: &PgPool, listing: &Listing) -> sqlx::Result<()> {

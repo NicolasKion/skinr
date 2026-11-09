@@ -4,16 +4,17 @@
   // and masked with a rounded clip, both GPU-composited, so moving between
   // hero and dock is one smooth transform rather than a re-render at every size.
   import { onMount, untrack } from 'svelte';
-  import { stage } from '#lib/stage.svelte.js';
+  import { stage, type StagePlacement } from '#lib/stage.svelte.js';
   import type { Engine, ShowTransition } from '#lib/viewer/engine.js';
-  import { HERO_POSE, TRANSITION_MS, easeInOut } from '#lib/viewer/poses.js';
+  import { HERO_POSE, SPHERE_SPAN, TRANSITION_MS, easeInOut } from '#lib/viewer/poses.js';
+  import { preloadShip } from '#lib/viewer/resources.js';
 
   /**
-   * How far the dock zooms in on the canvas, in dock widths per canvas width.
-   * Covering the dock outright would crop long hulls on a landscape canvas;
-   * this keeps a ship at about three quarters of the dock's width.
+   * How much of the dock's visible width or height a ship's bounding sphere
+   * may fill: the dock zooms in on the canvas no further, so a hull always
+   * fits, whatever the dock's shape, with some room around it.
    */
-  const DOCK_ZOOM = 1.7;
+  const DOCK_FILL = 0.85;
   /** How far a dimmed stage fades. */
   const DIM_OPACITY = 0.85;
   /** Lift the boot screen after this long, in ms, whatever is still loading. */
@@ -53,6 +54,19 @@
     };
   });
 
+  // A picked ship's files start downloading at once, even before the engine
+  // is up (resources.ts).
+  $effect(() => {
+    const id = stage.ship?.id;
+    if (id !== undefined) void preloadShip(id);
+  });
+
+  /**
+   * The DNA whose ship has loaded (or failed to): a stage that appears
+   * waits for this to catch up before it shows anything.
+   */
+  let loadedDna = $state<string | null>(null);
+
   // The ship shown last: a new DNA for the same ship is a livery change and
   // slides in as a carousel; a different ship flies in.
   let shownShipId: number | null = null;
@@ -87,6 +101,7 @@
       .show(dna, transition)
       .then((shown) => {
         if (shown && stage.dna === dna) {
+          loadedDna = dna;
           stage.status = 'ready';
           stage.booted = true;
           arrive();
@@ -94,6 +109,7 @@
       })
       .catch((error: Error) => {
         if (stage.dna !== dna) return;
+        loadedDna = dna;
         arrive();
         stage.status = 'error';
         stage.error = error.message;
@@ -106,6 +122,8 @@
     tx: number;
     ty: number;
     scale: number;
+    /** How much farther the camera sits so the ship fits the dock (1: as framed). */
+    frame: number;
     top: number;
     right: number;
     bottom: number;
@@ -117,6 +135,7 @@
     tx: 0,
     ty: 0,
     scale: 1,
+    frame: 1,
     top: 0,
     right: 0,
     bottom: 0,
@@ -132,19 +151,37 @@
   function place(inPage: boolean): Geometry {
     const { width: vw, height: vh } = viewport;
     const found = stage.dock;
-    if (leaping || stage.mode !== 'dock' || !found) return FULL;
+    if (leaping || stage.mode !== 'dock' || !found) {
+      // Full screen; a page's placement may still pull the camera back.
+      const framing = stage.mode === 'hero' && !leaping ? (stage.placement.framing ?? 1) : 1;
+      return framing === 1 ? FULL : { ...FULL, frame: framing };
+    }
     const dock = inPage ? { ...found, x: found.pageX, y: found.pageY } : found;
-    // The blueprint covers its slot exactly (the camera frames the hull to
-    // it); other docks zoom in only so far.
+    // A dock may run past the viewport's right edge (the explorer's frame
+    // does, to hide its right corners): the ship centres on, and fits, the
+    // part that is on screen.
+    const shown = Math.max(
+      1,
+      Math.min(found.width, document.documentElement.clientWidth - found.x),
+    );
+    // The canvas always covers the dock, so nothing it draws (a ship zoomed
+    // in) stops short of the dock's edge. The blueprint frames the hull to its
+    // slot itself; other docks have the camera pull back until the ship's
+    // sphere fits the part of the dock that is on screen.
     const cover = Math.max(dock.width / vw, dock.height / vh);
     const fitted = stage.blueprintFit !== null;
-    const scale = fitted ? cover : Math.min(cover, (dock.width / vw) * DOCK_ZOOM);
-    const tx = dock.x + dock.width / 2 - (vw * scale) / 2;
+    const sphere = vh * SPHERE_SPAN;
+    const fit = Math.min((shown * DOCK_FILL) / sphere, (dock.height * DOCK_FILL) / sphere);
+    const scale = cover;
+    const frame = fitted ? 1 : Math.max(1, cover / fit);
+    const centerX = dock.x + (fitted ? dock.width : shown) / 2;
+    const tx = centerX - (vw * scale) / 2;
     const ty = dock.y + dock.height / 2 - (vh * scale) / 2;
     return {
       tx,
       ty,
       scale,
+      frame,
       top: (dock.y - ty) / scale,
       left: (dock.x - tx) / scale,
       right: vw - (dock.x + dock.width - tx) / scale,
@@ -174,6 +211,7 @@
     a.tx === b.tx &&
     a.ty === b.ty &&
     a.scale === b.scale &&
+    a.frame === b.frame &&
     a.top === b.top &&
     a.right === b.right &&
     a.bottom === b.bottom &&
@@ -184,6 +222,7 @@
     tx: from.tx + (to.tx - from.tx) * k,
     ty: from.ty + (to.ty - from.ty) * k,
     scale: from.scale + (to.scale - from.scale) * k,
+    frame: from.frame + (to.frame - from.frame) * k,
     top: from.top + (to.top - from.top) * k,
     right: from.right + (to.right - from.right) * k,
     bottom: from.bottom + (to.bottom - from.bottom) * k,
@@ -199,7 +238,9 @@
     void placeKey;
     const mode = stage.mode;
     untrack(() => {
-      const glides = !leaping && (lastMode === 'hero' || mode === 'hero') && lastMode !== mode;
+      // A stage on its way out fades where it is; it does not glide.
+      const glides =
+        !leaping && visible && (lastMode === 'hero' || mode === 'hero') && lastMode !== mode;
       lastMode = mode;
       const from = anchored
         ? { ...shown, tx: shown.tx - window.scrollX, ty: shown.ty - window.scrollY }
@@ -222,7 +263,7 @@
         next = blend(move.from, target, easeInOut(t));
         if (t >= 1) move = null;
         anchored = false;
-      } else if (stage.mode === 'hidden') {
+      } else if (!visible) {
         // Fading out: stay exactly where it was (still scrolling with the
         // page if it was docked) rather than jumping somewhere.
         return;
@@ -243,16 +284,65 @@
     `inset(${shown.top}px ${shown.right}px ${shown.bottom}px ${shown.left}px round ${shown.radius}px)`,
   );
 
-  const visible = $derived(
+  /**
+   * Whether placement changes animate. A stage nobody sees (the explorer on a
+   * phone, which has no panel) places itself at once, and keeps doing so for
+   * a frame after it shows, so it appears where it belongs rather than
+   * gliding there from wherever it was left.
+   */
+  let settled = $state(false);
+  $effect(() => {
+    if (!visible) {
+      settled = false;
+      return;
+    }
+    const frame = requestAnimationFrame(() => (settled = true));
+    return () => cancelAnimationFrame(frame);
+  });
+
+  /** Whether the page wants the stage seen. */
+  const wanted = $derived(
     stage.leap
       ? stage.leap.shown
       : stage.mode === 'hero' || (stage.mode === 'dock' && stage.dock !== null),
   );
-  // Only the hero moves beside the page; the dock has its own frame.
-  const placement = $derived(
-    stage.mode === 'hero' && !leaping ? stage.placement : { x: 0, scale: 1 },
-  );
-  const dim = $derived(stage.mode === 'hero' && !leaping ? stage.dim : 0);
+  /**
+   * A stage that appears (on a ship's page after a phone's explorer, which
+   * has none) stays out of sight until its ship has loaded: meanwhile the
+   * canvas holds a half-streamed hull, or the previous one. Once shown it
+   * stays shown, and later ships and liveries arrive the usual way.
+   */
+  let waiting = $state(false);
+  let wasWanted = false;
+  $effect(() => {
+    const now = wanted;
+    const pending = !leaping && stage.dna !== null && loadedDna !== stage.dna;
+    untrack(() => {
+      if (now && !wasWanted && pending) waiting = true;
+      else if (!now || !pending) waiting = false;
+      wasWanted = now;
+    });
+  });
+  const visible = $derived(wanted && !waiting);
+  /**
+   * The hero's shift beside the page, its dimming and the camera's pull-back
+   * (only the hero moves beside the page; the dock has its own frame). A
+   * stage on its way out keeps them as they were and only fades: a ship
+   * leaving the hero for a dock that is not there (the explorer on a phone)
+   * must not slide or grow while it goes.
+   */
+  let held = $state({ placement: { x: 0, scale: 1 } as StagePlacement, dim: 0, frame: 1 });
+  $effect(() => {
+    if (!visible && !leaping) return;
+    const hero = stage.mode === 'hero' && !leaping;
+    held = {
+      placement: hero ? stage.placement : { x: 0, scale: 1 },
+      dim: hero ? stage.dim : 0,
+      frame: target.frame,
+    };
+  });
+  const placement = $derived(held.placement);
+  const dim = $derived(held.dim);
 
   // A leap lands on the hero's framing; set again only when it changes, so
   // the end of a leap does not interrupt the spin.
@@ -288,6 +378,20 @@
   $effect(() => {
     engine?.renderer.setBlueprint(leaping ? null : blueprintHalfHeight);
   });
+  // In a dock the camera pulls back so the ship fits the dock (place).
+  $effect(() => {
+    // A stage appearing frames its ship at once, like it places it.
+    engine?.renderer.setFraming(
+      held.frame,
+      untrack(() => !settled),
+    );
+  });
+
+  // The wheel zooms in a preview fixed to the screen (the explorer's and the
+  // SKINR pages' panel); where the page scrolls (a ship's page) it needs ctrl.
+  $effect(() => {
+    engine?.renderer.setWheelZoom(stage.mode === 'dock' && stage.dock?.fixed === true);
+  });
 
   // Draw the blueprint once the ship (in this livery) is fully on stage.
   let drafting: string | null = null;
@@ -314,6 +418,8 @@
 <div
   class="stage top-0 left-0 z-10 h-dvh w-screen origin-top-left {anchored ? 'absolute' : 'fixed'}"
   class:leaping
+  class:unsettled={!settled}
+  class:gone={!visible}
   class:pointer-events-none={!visible || leaping}
   class:pointer-events-auto={visible && !leaping}
   style:transform
@@ -324,7 +430,7 @@
   <div
     bind:this={host}
     class="canvas-host h-full w-full"
-    style:transform="translateX({placement.x * 100}vw) scale({placement.scale})"
+    style:transform="translate({placement.x * 100}vw, {(placement.y ?? 0) * 100}dvh) scale({placement.scale})"
     style:opacity={1 - dim * DIM_OPACITY}
   ></div>
 </div>
@@ -333,11 +439,18 @@
   .stage {
     view-transition-name: stage;
     transition: opacity 0.7s var(--ease-apple);
+  }
+  /* Going away is quick; only showing up takes its time. */
+  .stage.gone {
+    transition-duration: 0.25s;
+  }
+  .stage {
     will-change: transform, clip-path;
   }
-  /* A leap shows and places the stage at once. */
+  /* A leap shows and places the stage at once; so does a stage appearing. */
   .stage.leaping,
-  .stage.leaping .canvas-host {
+  .stage.leaping .canvas-host,
+  .stage.unsettled .canvas-host {
     transition: none;
   }
   /* The hero's shift beside a chapter's text: same length and curve as

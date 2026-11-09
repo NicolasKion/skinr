@@ -1,7 +1,7 @@
 # skinr.space
 
 Try on EVE Online ship skins (the in-game ones and SKINR designs on sale)
-on the real hull in 3D. A Rust API (Axum + Postgres via sqlx) serving JSON plus a `/cdn` passthrough to CCP's client CDNs, and a SvelteKit
+on the real hull in 3D. A Rust API (Axum + Postgres via sqlx) serving JSON plus the game's files under `/cdn`, and a SvelteKit
 frontend in `frontend/` (SSR, adapter-node, Tailwind v4, shadcn-svelte). The
 setup mirrors MutaMarket (`../MutaMarket`): when in doubt about structure,
 theme or tooling, do what it does.
@@ -9,8 +9,14 @@ theme or tooling, do what it does.
 ## Rules
 
 - One origin: the Vite dev proxy (`frontend/proxy-paths.ts`) and
-  `deploy/Caddyfile` route `/api` and `/cdn` to Axum. Keep them in sync and
-  never point the browser at Axum's port.
+  `deploy/Caddyfile` route `/api`, `/cdn`, `/eve` (the SSO), `/og` (link
+  preview cards) and `/sitemap.xml` to Axum. Keep them in sync and never
+  point the browser at Axum's port.
+- Game files reach the browser by `res:/` path through the API
+  (`src/game_files`): `/cdn/build`, `/cdn/res/{build}/{path}` (kept on disk,
+  zstd where accepted) and `/cdn/list/{build}/{folder}`. The API holds CCP's
+  file index; the browser never loads it. `#lib/viewer/resources.ts` is the
+  only client, and preloads a picked ship's files (`/api/ships/{id}/files`).
 - Ship data comes from the native SDE import (`cargo run --bin sde_import`),
   never hand-written fixtures in production.
 - SDE text (descriptions and anything else from the game) is EVE HTML, not HTML.
@@ -43,6 +49,37 @@ theme or tooling, do what it does.
   the section views below), with two rails (`#lib/components/skin-rail.svelte`):
   the game's skins and the players' SKINR designs.
 - The chapter effect on the ship page alone sets `stage.mode`.
+- URLs read: a ship is `/ships/{name-slug}` (an id redirects there), one of
+  its skins `/ships/{ship}/skins/{skin-slug}`, a SKINR design
+  `/ships/{ship}/skinr/{name-slug}-{first 12 of its id}`, a designer
+  `/skinr/designer/{name-slug}-{id}` (ids decide). The ship page is one route
+  (`ships/[ship]/[...livery]`): picking a livery changes the path, not the
+  page. Build URLs with `shipHref`, `skinHref`, `designHref` and
+  `designerHref` (`#lib/urls.ts`), never by hand; the sitemap's `src/urls.rs`
+  must agree with them.
+- Every page's head goes through `#lib/components/seo.svelte` (title,
+  description, canonical, Open Graph/Twitter card from `/og/…`, JSON-LD).
+  `PUBLIC_ORIGIN` makes its URLs absolute.
+- Phones: below `lg` there is no preview panel (a card opens its ship), the
+  livery chapter stacks its ship above the text, and grids of text that can
+  run long need `min-w-0` (or `minmax(0, 1fr)` columns) so they cannot widen
+  the page.
+- The preview panel on the right (explorer, Paragon Hub, `/me`) is one
+  component, `#lib/components/peek-panel.svelte`: the stage's dock, the
+  page's labels over it, the resize handle and the footer clearance. Its
+  width is `peek.css` (`#lib/peek.svelte.ts`, saved in a cookie) as
+  `--peek`, which does not inherit: each element that uses it sets
+  `style:--peek={peek.css}` itself (the page's main column for its padding),
+  never an ancestor, or every frame of a drag restyles the whole page. Code
+  that runs during the drag must not read the layout right after a change
+  (no `getBoundingClientRect` in an effect on the width), and carousels skip
+  their re-measure while `peek.resizing`. Pages only pass their labels and
+  backdrop. The wheel zooms the stage in it, and needs ctrl wherever the
+  page scrolls under the canvas.
+- Page transitions (`+layout.svelte`, `layout.css`): pages slide the way the
+  site bar reads (`PAGE_ORDER`); the site bar, the stage and a panel both
+  pages have stay put. Shared elements morph by `view-transition-name`, one
+  element per name and page.
 - The site bar (`#lib/components/site-bar.svelte`) lives in the root layout;
   pages put their breadcrumb, section links and reset action into
   `#lib/nav.svelte.ts` while mounted and clear it on the way out.
@@ -63,8 +100,9 @@ theme or tooling, do what it does.
   `#lib/components/skin-icon.svelte` picks.
 - A resource read that fails is reported by the renderer (`onMissing`) and
   collected in `stage.missing`; a broken ship glitches (the same post pass,
-  `setGlitch`) and `#lib/components/stage-alert.svelte` says why. Runtime
-  formats are opt-in: register any new one in `resMan.Register({ formats })`.
+  `setGlitch`) and `#lib/components/stage-alert.svelte` says why. The runtime
+  is set up through `CjsLibrary` (its defaults cover PNG, textures, geometry
+  and object files); add any other format to its `formats` configuration.
 - ESI goes through `src/esi/client.rs` only: it pins `COMPATIBILITY_DATE`
   (undated requests get the 2020 API, without SKINR), names the app and backs
   off on 420/429. Look routes up with the global `esi` skill, not from memory.
@@ -74,6 +112,18 @@ theme or tooling, do what it does.
   a design into SOF DNA (`material?…`) plus a synthetic SOF pattern for its
   projected layers (`#lib/skinr.ts`), registered with the engine before the
   build (`stage.pattern`, `engine.registerPattern`).
+- Log in with EVE (`src/auth/`): the API does the whole SSO round trip
+  (`/eve/login`, `/eve/callback`, `POST /eve/logout`), checks
+  the JWT against CCP's JWKS, keeps tokens in Postgres and refreshes them;
+  the browser only ever holds the HttpOnly session cookie. The only scope is
+  `esi.cosmetic.char:read`. Login is off until `EVE_CLIENT_ID`,
+  `EVE_CLIENT_SECRET` and `EVE_CALLBACK_URL` are set. A character's ESI
+  answers go through `src/esi/cache.rs`, which keeps them until they expire.
+- The SKINR pages (`/skinr`, the hub; `/me`, a character's own) dock the
+  stage in `#lib/components/skinr-dock.svelte` and keep the picked design in
+  `?skinr=` (`#lib/skinr-stage.svelte.ts`).
+- Rust tests that need Postgres get a database of their own
+  (`tests/common/mod.rs`, `TEST_DATABASE_URL`).
 - Chapters with their own ship (the liveries) use
   `#lib/components/section-stage.svelte`; each section view has a key and its
   own canvas and camera in the renderer (`sectionCanvas`, `setSectionView`).
@@ -84,9 +134,56 @@ theme or tooling, do what it does.
 - Only one element per page may carry `view-transition-name: ship-name`
   (`stage.morphId` picks it).
 - `@carbonenginejs/runtime` is pre-alpha. Workarounds live in
-  `frontend/src/lib/viewer/renderer.ts` and `frontend/vite.config.ts`, each
-  commented; remove them as the runtime fills the gaps.
+  `frontend/src/lib/viewer/renderer.ts`, `frontend/src/lib/viewer/ship.ts`
+  and `frontend/vite.config.ts`, each commented; remove them as the runtime
+  fills the gaps.
+- The blueprint draws the hull alone (`hullOnly` in `renderer.ts`): a
+  livery's effects must not change its size, or the page jumps.
 - WebGPU needs a headed Chromium on Linux; `frontend/scripts/shot.js` opens one.
+- Open Graph cards live in `src/og` (as in MutaMarket): SVG set in the
+  embedded Inter faces (`assets/fonts`), rasterized with resvg, served under
+  `/og/...` and kept in `OG_CACHE_DIR`. A card's file name hashes everything
+  it shows, so it redraws when that changes; bump `CARD_VERSION` after a
+  layout change. Livery art comes from the render worker (`RENDERER_URL`);
+  a card that cannot wait for it shows the ship thumbnail, is not stored and
+  is cached briefly, while the render lands on disk for the next request.
+- The render worker (`frontend/scripts/render-server.ts`, the `renderer`
+  service) is Node with WebGPU from the `webgpu` package (Dawn), no Deno and
+  no browser; its studio is `frontend/scripts/render/studio.ts`, and Node
+  runs those files by stripping types, so shared viewer code must not use
+  TypeScript-only syntax (parameter properties, enums). It is internal only,
+  runs `WORKERS` warm child processes that each take one shot at a time and
+  are replaced every `MAX_RENDERS`, and draws SKINR designs through
+  `#lib/skinr.ts`. A shot is mostly one busy thread, so the pool is what
+  uses the machine; compose sets `WORKERS` and the API's
+  `THUMBNAIL_CONCURRENCY` from one `RENDER_WORKERS`. Themes with the same
+  look share one picture. A shot is taken on the first frame that started
+  with nothing loading and asked for nothing new, at a fixed engine clock
+  and random seed, after `WARM_UP_UPDATES` scene updates (booster glow eases
+  in per update, not per second), so a livery always gets the same picture.
+  Production has no GPU: Mesa's lavapipe draws on the CPU (it has BC
+  compression).
+- Thumbnails belong to the API: `src/thumbnails.rs` asks the worker
+  (`POST /thumbnail`, a DNA or a SKINR design) for every ship, then every
+  SKINR design on sale, every in-game skin and the other designs, whose DNA (a
+  design's look, `dna::design_look`) differs from its `.dna`, at start and
+  hourly (`THUMBNAIL_SYNC=0` turns it off). Each gets `-dark.png`,
+  `-light.png`, `.files` (the paths the render used, for preloading) and the
+  `.dna` last in `THUMBNAILS_DIR`: `<ship>`, `skins/<ship>_<skin>` (a skin
+  can fit several hulls), `designs/<design id>`, served at
+  `/api/thumbnails/...` (and as WebP at card sizes, `-<theme>-{256,512}.webp`).
+  Pictures of a livery go through `#lib/components/livery-thumbnail.svelte`
+  (its own thumbnail, then the bare hull's, then CCP's icon); skin and design
+  Open Graph cards show it while their own render is missing.
+- The debug tools (`DEBUG_TOOLS=1` on the API and the frontend, on in docker
+  compose, never in production) draw a livery's thumbnails on request:
+  `src/server/debug.rs` under `/api/debug`, and the bug button by the ship
+  page's livery names (`#lib/components/thumbnail-debug.svelte`), which also
+  shows the page's share card.
+- SOF DNA strings are built by `src/dna.rs` only.
+- `/sitemap.xml` comes from the database. Page URLs are built in Rust by
+  `src/urls.rs` and must match `#lib/urls.ts` exactly (same slug rules, same
+  test cases); change both together.
 
 ## Commands
 
@@ -97,11 +194,10 @@ theme or tooling, do what it does.
   after a new migration updates both.
 - `docker compose up -d postgres`, `cargo run`, then `npm run dev -- --port 5200`
   in `frontend/` for development (Postgres on 127.0.0.1:5434, API on 3100).
-- Ship thumbnails (`<id>-dark.png`, `<id>-light.png`) are rendered without a
-  browser: `deno run -A --node-modules-dir=manual scripts/render-thumbnails.ts`
-  in `frontend/` with the API up (`API=http://localhost:5200` for docker). It
-  writes `storage/thumbnails`, which the API serves at `/api/thumbnails`, and
-  skips ships already done, so an interrupted run just starts again.
+- Thumbnails outside docker: run the worker with
+  `API=http://127.0.0.1:3100 node scripts/render-server.ts` in `frontend/`
+  and the API with `RENDERER_URL=http://127.0.0.1:3200`; it fills
+  `storage/thumbnails`. In docker they live in the `thumbnails` volume.
 - Before committing: `cargo fmt`, `cargo clippy --all-targets` (zero warnings),
   `cargo test`, and in `frontend/` `npm run check`, `npm run lint`,
   `npm run format:check`, `npm test`.

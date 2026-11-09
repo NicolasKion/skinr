@@ -10,11 +10,21 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* The preview panel's width (#lib/peek.svelte.ts). It does not inherit: it
+   changes every frame of a drag, and an inherited custom property would make
+   the browser restyle every element below the one that holds it. Each element
+   that uses it sets it itself. */
+@property --peek {
+  syntax: '*';
+  inherits: false;
+}
+
 /* Dark by default: near-black surfaces, white type, and one accent that
    pages tint per race through --tint (see #lib/eve raceTint). The light
    theme (html.light, #lib/theme) swaps the same tokens; components draw with
    the tokens, never with white or black, so both themes follow. A surface
-   that is dark in either theme (the blueprint paper) takes .theme-dark. */
+   that is dark in either theme (the blueprint paper) takes .theme-dark, one
+   that is light in either theme (a light thumbnail's backdrop) .theme-light. */
 :root,
 .theme-dark {
   --radius: 1rem;
@@ -55,12 +65,14 @@
   color-scheme: dark;
 }
 
-.theme-dark {
+.theme-dark,
+.theme-light {
   color: var(--foreground);
 }
 
 /* Light: Apple's off-white page, near-black type, white glass. */
-:root.light {
+:root.light,
+.theme-light {
   --background: #f5f5f7;
   --foreground: #1d1d1f;
   --card: #ffffff;
@@ -269,8 +281,12 @@ html[data-booting] *::after {
 ::view-transition-new(root) {
   animation: 420ms var(--ease-apple) both vt-fade-in;
 }
+/* How long a shared element takes to move to its new place. */
+:root {
+  --vt-move: 520ms;
+}
 ::view-transition-group(*) {
-  animation-duration: 520ms;
+  animation-duration: var(--vt-move);
   animation-timing-function: var(--ease-apple);
 }
 /* The 3D stage animates itself and must stay live through a transition. */
@@ -282,6 +298,91 @@ html[data-booting] *::after {
 }
 ::view-transition-group(stage) {
   animation: none;
+}
+
+/* The site bar never moves with a page: it swaps in place. */
+::view-transition-old(site-bar) {
+  display: none;
+}
+::view-transition-new(site-bar),
+::view-transition-group(site-bar) {
+  animation: none;
+}
+
+/* Between two pages with the preview panel (+layout.svelte sets
+   data-peek-static), the panel stays put: frame, labels and handle swap in
+   place over the live stage while only the page beside them changes. */
+html[data-peek-static] .peek-frame {
+  view-transition-name: peek-frame;
+}
+html[data-peek-static] .peek-labels {
+  view-transition-name: peek-labels;
+}
+html[data-peek-static] .peek-handle {
+  view-transition-name: peek-handle;
+}
+::view-transition-old(peek-frame),
+::view-transition-old(peek-labels),
+::view-transition-old(peek-handle) {
+  display: none;
+}
+::view-transition-new(peek-frame),
+::view-transition-new(peek-labels),
+::view-transition-new(peek-handle),
+::view-transition-group(peek-frame),
+::view-transition-group(peek-labels),
+::view-transition-group(peek-handle) {
+  animation: none;
+}
+
+/* Moving between the site's areas (+layout.svelte, PAGE_ORDER), the page
+   slides a little the way the site bar reads. */
+html[data-nav='area-forward']::view-transition-old(root) {
+  animation: 300ms var(--ease-apple) both vt-area-out-left;
+}
+html[data-nav='area-forward']::view-transition-new(root) {
+  animation: 480ms var(--ease-apple) both vt-area-in-right;
+}
+html[data-nav='area-back']::view-transition-old(root) {
+  animation: 300ms var(--ease-apple) both vt-area-out-right;
+}
+html[data-nav='area-back']::view-transition-new(root) {
+  animation: 480ms var(--ease-apple) both vt-area-in-left;
+}
+@keyframes vt-area-out-left {
+  to {
+    opacity: 0;
+    transform: translateX(-2.5rem);
+  }
+}
+@keyframes vt-area-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(2.5rem);
+  }
+}
+@keyframes vt-area-out-right {
+  to {
+    opacity: 0;
+    transform: translateX(2.5rem);
+  }
+}
+@keyframes vt-area-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-2.5rem);
+  }
+}
+
+/* A designer's portrait, name and count morph between the hub's chip and
+   their page's header (data-morph, +layout.svelte): the old page clears out
+   at once and the new one fades in only once they have landed, so the list
+   never runs under them. Placed after the area slides, which it replaces. */
+html[data-morph]::view-transition-old(root) {
+  animation: 180ms var(--ease-apple) both vt-fade-out;
+}
+html[data-morph]::view-transition-new(root) {
+  animation: 380ms var(--ease-apple) var(--vt-move) both vt-fade-in;
 }
 
 /* Explorer and ship page sit side by side: the page shifts over in step with

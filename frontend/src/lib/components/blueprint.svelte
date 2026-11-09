@@ -33,6 +33,13 @@
 
   /** Space between views, in CSS pixels. */
   const GAP = 56;
+  /**
+   * Below this drawing width (a phone) the views stack, side elevation, plan
+   * and front, each the width of the sheet, instead of sitting side by side.
+   */
+  const STACK_BELOW = 640;
+  /** How much of the sheet's width a stacked view fills. */
+  const STACK_FILL = 0.9;
   /** The tallest the drawing may get, as a share of the viewport height. */
   const MAX_DRAWING_HEIGHT = 0.7;
   /** A CSS pixel on paper, in metres (96 per inch). */
@@ -47,6 +54,7 @@
   let areaWidth = $state(0);
   let innerHeight = $state(900);
 
+  const stacked = $derived(areaWidth > 0 && areaWidth < STACK_BELOW);
   const side = $derived(drawing?.views.find((view) => view.name === 'side') ?? null);
   const top = $derived(drawing?.views.find((view) => view.name === 'top') ?? null);
   const front = $derived(drawing?.views.find((view) => view.name === 'front') ?? null);
@@ -59,6 +67,8 @@
     const frontWidth = (front?.width ?? 0) * mpp;
     const height = drawing.halfHeight * 2 + (top?.height ?? 0) * mpp;
     if (!length || !height) return 0;
+    // Stacked, each view only has to fit the width; the page scrolls.
+    if (stacked) return (areaWidth * STACK_FILL) / Math.max(length, frontWidth);
     const room = areaWidth - GAP * 2;
     return Math.min(
       room / (length + frontWidth),
@@ -111,7 +121,11 @@
   </header>
 {/snippet}
 
-<div class="sheet grid lg:grid-cols-2" class:built style:--start="{BUILD_START}ms">
+<div
+  class="sheet grid grid-cols-[minmax(0,1fr)] lg:grid-cols-2"
+  class:built
+  style:--start="{BUILD_START}ms"
+>
   <!-- The drawing: the only zone on drafting grid. -->
   <DrawnZone {built} class="drawing-zone lg:col-span-2">
     <p class="build strip" style:--delay="0ms">
@@ -119,9 +133,12 @@
       <span>Scale {scale ?? '-'}</span>
       <span>Sheet 1 of 1</span>
     </p>
-    <div class="px-6 pt-4 pb-10" bind:clientWidth={areaWidth}>
+    <div class="px-4 pt-4 pb-10 sm:px-6" bind:clientWidth={areaWidth}>
       {#if drawing && slot && k}
-        <div class="flex items-start justify-center" style:gap="{GAP}px">
+        <div
+          class="flex justify-center {stacked ? 'flex-col items-center' : 'items-start'}"
+          style:gap="{stacked ? GAP * 0.8 : GAP}px"
+        >
           <div class="flex flex-col" style:gap="{GAP * 0.8}px">
             <!-- The side elevation: the live ship docks here. -->
             <figure class="relative" style:width="{slot.width}px">
@@ -174,7 +191,7 @@
               <figure
                 class="build relative"
                 style:--delay="250ms"
-                style:margin-top="{slot.height / 2 - front.centerY * px}px"
+                style:margin-top="{stacked ? 0 : slot.height / 2 - front.centerY * px}px"
               >
                 <div class="relative w-fit">
                   <img

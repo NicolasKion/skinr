@@ -7,6 +7,7 @@ use axum::http::{Request, StatusCode, header};
 use axum::routing::get;
 use http_body_util::BodyExt;
 use skinr::cdn::CdnClient;
+use skinr::game_files::GameFiles;
 use skinr::server::{AppState, router};
 use tower::ServiceExt;
 
@@ -45,7 +46,14 @@ async fn app() -> Router {
         // Never connected: these routes do not touch the database.
         pool: sqlx::PgPool::connect_lazy("postgres://unused@127.0.0.1:1/unused").unwrap(),
         cdn: CdnClient::new(&upstream, &upstream),
+        game_files: GameFiles::new(CdnClient::new(&upstream, &upstream), std::env::temp_dir()),
         thumbnails: std::env::temp_dir(),
+        esi: skinr::esi::client::EsiClient::new("http://127.0.0.1:1", "skinr.space-test/1.0"),
+        sso: None,
+        og: skinr::og::Og::new(skinr::og::OgConfig::from_env(std::env::temp_dir())),
+        public_origin: "https://skinr.space".to_owned(),
+        drawing: None,
+        debug: false,
     })
 }
 

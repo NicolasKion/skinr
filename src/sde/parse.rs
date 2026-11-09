@@ -2,8 +2,9 @@
 //!
 //! A ship is a published type in the Ship category whose graphic names a
 //! Space Object Factory hull; the graphic's hull, faction and race make up
-//! its default DNA. A skin keeps the hull and race and swaps the faction for
-//! the one its material set names.
+//! its default DNA. A skin keeps the hull and race, swaps in the faction its
+//! material set names (or keeps the ship's) and adds the set's DNA commands:
+//! its four materials, its projected pattern and its resource path insert.
 
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
@@ -99,6 +100,10 @@ struct GraphicRow {
     sof_faction: Option<String>,
     #[serde(rename = "sofRaceName")]
     sof_race: Option<String>,
+    /// The material set the hull wears by default (tournament prize ships
+    /// and special editions), on top of its faction.
+    #[serde(rename = "sofMaterialSetID")]
+    sof_material_set_id: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -191,9 +196,62 @@ struct MaterialSetRow {
     color_secondary: Option<Rgb>,
     #[serde(rename = "colorHull")]
     color_hull: Option<Rgb>,
+    material1: Option<String>,
+    material2: Option<String>,
+    material3: Option<String>,
+    material4: Option<String>,
+    #[serde(rename = "sofPatternName")]
+    pattern: Option<String>,
+    custommaterial1: Option<String>,
+    custommaterial2: Option<String>,
+    #[serde(rename = "resPathInsert")]
+    res_path_insert: Option<String>,
+}
+
+/// The SOF's word for an unset material, pattern material or path insert.
+const SOF_NONE: &str = "none";
+
+/// A name the set gives, or `None` when it leaves it unset: missing, empty,
+/// or spelled `none` in any case (the SDE writes both `none` and `None`).
+fn set_name(name: Option<&String>) -> Option<&str> {
+    name.map(String::as_str)
+        .filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case(SOF_NONE))
+}
+
+/// A name the SOF should use, or [`SOF_NONE`] when the set leaves it unset.
+fn sof_name(name: Option<&String>) -> &str {
+    set_name(name).unwrap_or(SOF_NONE)
 }
 
 impl MaterialSetRow {
+    /// The SOF DNA commands that dress a hull in this set, joined by `:`
+    /// (empty when it only swaps the faction), as the client builds them.
+    fn sof_commands(&self) -> String {
+        let mut commands = Vec::new();
+        let materials = [
+            &self.material1,
+            &self.material2,
+            &self.material3,
+            &self.material4,
+        ]
+        .map(|material| sof_name(material.as_ref()));
+        if materials.iter().any(|material| *material != SOF_NONE) {
+            commands.push(format!("material?{}", materials.join(";")));
+        }
+        if let Some(pattern) = set_name(self.pattern.as_ref()) {
+            commands.push(format!(
+                "pattern?{pattern};{};{}",
+                sof_name(self.custommaterial1.as_ref()),
+                sof_name(self.custommaterial2.as_ref()),
+            ));
+        }
+        let insert = sof_name(self.res_path_insert.as_ref());
+        if insert != SOF_NONE {
+            commands.push(format!("respathinsert?{insert}"));
+        }
+        commands.join(":")
+    }
+
     fn colors(&self) -> LiveryColors {
         LiveryColors {
             primary: self.color_primary.as_ref().map(Rgb::hex),
@@ -203,10 +261,19 @@ impl MaterialSetRow {
     }
 }
 
-/// The material sets that swap in a SOF faction, by id, plus the colors of
-/// each faction (its lowest-id set) for the liveries no skin names.
+/// What one material set does to a hull.
+struct MaterialLook {
+    /// The SOF faction it swaps in; `None` keeps the ship's own.
+    faction: Option<String>,
+    /// Its DNA commands (see [`MaterialSetRow::sof_commands`]).
+    commands: String,
+    colors: LiveryColors,
+}
+
+/// The material sets by id, plus the colors of each faction (its lowest-id
+/// set) for the liveries no skin names.
 struct MaterialSets {
-    by_id: HashMap<i32, (String, LiveryColors)>,
+    by_id: HashMap<i32, MaterialLook>,
     by_faction: HashMap<String, LiveryColors>,
 }
 
@@ -219,14 +286,25 @@ fn read_material_sets(reader: impl BufRead) -> Result<MaterialSets, Error> {
         by_faction: HashMap::new(),
     };
     for row in rows {
-        let Some(faction) = row.sof_faction.clone() else {
-            continue;
-        };
         let colors = row.colors();
-        sets.by_faction
-            .entry(faction.clone())
-            .or_insert_with(|| colors.clone());
-        sets.by_id.insert(row.id, (faction, colors));
+        let commands = row.sof_commands();
+        if let Some(faction) = &row.sof_faction {
+            sets.by_faction
+                .entry(faction.clone())
+                .or_insert_with(|| colors.clone());
+        }
+        // A set that neither swaps the faction nor adds a command changes nothing.
+        if row.sof_faction.is_none() && commands.is_empty() {
+            continue;
+        }
+        sets.by_id.insert(
+            row.id,
+            MaterialLook {
+                faction: row.sof_faction,
+                commands,
+                colors,
+            },
+        );
     }
     Ok(sets)
 }
@@ -282,6 +360,12 @@ pub fn parse<R: BufRead>(files: SdeFiles<R>) -> Result<ShipTables, Error> {
         else {
             continue;
         };
+        let look = graphic
+            .sof_material_set_id
+            .and_then(|id| material_sets.by_id.get(&id));
+        let faction = look
+            .and_then(|look| look.faction.as_ref())
+            .unwrap_or(faction);
 
         ships.push(Ship {
             id: row.id,
@@ -300,11 +384,17 @@ pub fn parse<R: BufRead>(files: SdeFiles<R>) -> Result<ShipTables, Error> {
             sof_hull: hull.clone(),
             sof_faction: faction.clone(),
             sof_race: race.clone(),
-            colors: material_sets
-                .by_faction
-                .get(faction)
-                .cloned()
-                .unwrap_or_default(),
+            sof_commands: look.map(|look| look.commands.clone()).unwrap_or_default(),
+            colors: look.map_or_else(
+                || {
+                    material_sets
+                        .by_faction
+                        .get(faction)
+                        .cloned()
+                        .unwrap_or_default()
+                },
+                |look| look.colors.clone(),
+            ),
         });
     }
     ships.sort_by_key(|ship| ship.id);
@@ -386,32 +476,30 @@ pub fn parse<R: BufRead>(files: SdeFiles<R>) -> Result<ShipTables, Error> {
     })
 }
 
-/// The Tranquility skins of each ship that swap in a SOF faction, one per
-/// distinct faction (Serenity-only twins share their material set).
+/// The Tranquility skins of each ship that change its look, one per distinct
+/// look (Serenity-only twins share their material set).
 fn parse_skins<R: BufRead>(
     ships: &[Ship],
     skins: R,
     skin_materials: R,
     material_sets: &MaterialSets,
 ) -> Result<Vec<ShipSkin>, Error> {
-    let defaults: HashMap<i32, &str> = ships
+    let defaults: HashMap<i32, (&str, &str)> = ships
         .iter()
-        .map(|ship| (ship.id, ship.sof_faction.as_str()))
+        .map(|ship| {
+            (
+                ship.id,
+                (ship.sof_faction.as_str(), ship.sof_commands.as_str()),
+            )
+        })
         .collect();
 
-    let materials: HashMap<i32, (String, String, LiveryColors)> =
+    let materials: HashMap<i32, (String, &MaterialLook)> =
         read_jsonl::<SkinMaterialRow>(skin_materials)?
             .into_iter()
             .filter_map(|material| {
-                let (faction, colors) = material_sets.by_id.get(&material.material_set_id?)?;
-                Some((
-                    material.id,
-                    (
-                        material.display_name.text(),
-                        faction.clone(),
-                        colors.clone(),
-                    ),
-                ))
+                let look = material_sets.by_id.get(&material.material_set_id?)?;
+                Some((material.id, (material.display_name.text(), look)))
             })
             .collect();
 
@@ -424,14 +512,19 @@ fn parse_skins<R: BufRead>(
         .into_iter()
         .filter(|skin| skin.visible_tranquility)
     {
-        let Some((name, faction, colors)) = materials.get(&skin.skin_material_id) else {
+        let Some((name, look)) = materials.get(&skin.skin_material_id) else {
             continue;
         };
         for ship_id in skin.types {
-            let Some(default) = defaults.get(&ship_id) else {
+            let Some(&(default_faction, default_commands)) = defaults.get(&ship_id) else {
                 continue;
             };
-            if faction == default || !seen.insert((ship_id, faction.clone())) {
+            let faction = look.faction.as_deref().unwrap_or(default_faction);
+            // The ship's own look is not a skin.
+            if faction == default_faction && look.commands == default_commands {
+                continue;
+            }
+            if !seen.insert((ship_id, faction.to_owned(), look.commands.clone())) {
                 continue;
             }
             out.push(ShipSkin {
@@ -439,8 +532,9 @@ fn parse_skins<R: BufRead>(
                 skin_id: skin.id,
                 material_id: skin.skin_material_id,
                 name: name.clone(),
-                sof_faction: faction.clone(),
-                colors: colors.clone(),
+                sof_faction: faction.to_owned(),
+                sof_commands: look.commands.clone(),
+                colors: look.colors.clone(),
             });
         }
     }
@@ -466,6 +560,9 @@ mod tests {
                 r#"{"_key": 314, "sofHullName": "cf7_t1", "sofFactionName": "caldaribase", "sofRaceName": "caldari"}"#,
                 "\n",
                 r#"{"_key": 400, "iconFolder": "res:/x"}"#,
+                "\n",
+                // A prize hull that wears its own material set.
+                r#"{"_key": 315, "sofHullName": "cf7_t1", "sofFactionName": "caldaribase", "sofRaceName": "caldari", "sofMaterialSetID": 104}"#,
             )
             .as_bytes(),
             races: r#"{"_key": 1, "name": {"en": "Caldari"}, "description": {"en": "State"}}"#
@@ -479,6 +576,8 @@ mod tests {
                 r#"{"_key": 11, "displayName": {"en": "Caldari"}, "materialSetID": 101}"#,
                 "\n",
                 r#"{"_key": 12, "displayName": {"en": "Materials only"}, "materialSetID": 102}"#,
+                "\n",
+                r#"{"_key": 13, "displayName": {"en": "Prize"}, "materialSetID": 104}"#,
             )
             .as_bytes(),
             material_sets: concat!(
@@ -490,6 +589,8 @@ mod tests {
                 r#"{"_key": 103, "sofFactionName": "caldaribase", "colorPrimary": {"r": 0.0, "g": 1.0, "b": 0.0, "a": 1.0}}"#,
                 "\n",
                 r#"{"_key": 102, "material1": "black_satin_enamel"}"#,
+                "\n",
+                r#"{"_key": 104, "sofFactionName": "tournament", "sofPatternName": "prize", "colorPrimary": {"r": 0.0, "g": 1.0, "b": 0.0, "a": 1.0}}"#,
             )
             .as_bytes(),
             type_dogma: b"",
@@ -544,6 +645,7 @@ mod tests {
                 sof_hull: "cf7_t1".into(),
                 sof_faction: "caldaribase".into(),
                 sof_race: "caldari".into(),
+                sof_commands: String::new(),
                 colors: LiveryColors {
                     primary: Some("#0000ff".into()),
                     secondary: None,
@@ -601,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn skins_swap_the_faction_once_per_ship() {
+    fn skins_change_the_look_once_per_ship() {
         let skins = concat!(
             r#"{"_key": 1, "skinMaterialID": 10, "types": [603], "visibleTranquility": true}"#,
             "\n",
@@ -614,7 +716,7 @@ mod tests {
             // The ship's own faction is not a skin.
             r#"{"_key": 4, "skinMaterialID": 11, "types": [603], "visibleTranquility": true}"#,
             "\n",
-            // A material-only set has no faction to swap in.
+            // A material-only set keeps the ship's faction.
             r#"{"_key": 5, "skinMaterialID": 12, "types": [603], "visibleTranquility": true}"#,
             "\n",
             // A type that is not a stored ship.
@@ -624,18 +726,92 @@ mod tests {
 
         assert_eq!(
             tables.skins,
-            vec![ShipSkin {
-                ship_id: 603,
-                skin_id: 1,
-                material_id: 10,
-                name: "Nugoeihuvi".into(),
-                sof_faction: "noh".into(),
-                colors: LiveryColors {
-                    primary: Some("#ff0000".into()),
-                    secondary: None,
-                    hull: None,
+            vec![
+                ShipSkin {
+                    ship_id: 603,
+                    skin_id: 1,
+                    material_id: 10,
+                    name: "Nugoeihuvi".into(),
+                    sof_faction: "noh".into(),
+                    sof_commands: String::new(),
+                    colors: LiveryColors {
+                        primary: Some("#ff0000".into()),
+                        secondary: None,
+                        hull: None,
+                    },
                 },
-            }]
+                ShipSkin {
+                    ship_id: 603,
+                    skin_id: 5,
+                    material_id: 12,
+                    name: "Materials only".into(),
+                    sof_faction: "caldaribase".into(),
+                    sof_commands: "material?black_satin_enamel;none;none;none".into(),
+                    colors: LiveryColors::default(),
+                },
+            ]
         );
+    }
+
+    #[test]
+    fn a_hull_wears_its_graphics_material_set() {
+        let prize = r#"{"_key": 607, "name": {"en": "Prize"}, "groupID": 25, "published": true, "graphicID": 315}"#;
+        let skins = concat!(
+            // The hull's own set is its default look, not a skin.
+            r#"{"_key": 1, "skinMaterialID": 13, "types": [607], "visibleTranquility": true}"#,
+            "\n",
+            r#"{"_key": 2, "skinMaterialID": 11, "types": [607], "visibleTranquility": true}"#,
+        );
+        let tables = parse(files(prize, skins)).unwrap();
+
+        let ship = &tables.ships[0];
+        assert_eq!(ship.sof_faction, "tournament");
+        assert_eq!(ship.sof_commands, "pattern?prize;none;none");
+        assert_eq!(ship.colors.primary.as_deref(), Some("#00ff00"));
+        let skins: Vec<_> = tables
+            .skins
+            .iter()
+            .map(|skin| {
+                (
+                    skin.skin_id,
+                    skin.sof_faction.as_str(),
+                    skin.sof_commands.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(skins, vec![(2, "caldaribase", "")]);
+    }
+
+    #[test]
+    fn material_sets_become_dna_commands() {
+        let row: MaterialSetRow = serde_json::from_str(
+            r#"{"_key": 282, "sofFactionName": "bloodraider_gallente",
+                "material1": "grey_tin_metallic", "material2": "black_onyx_metallic",
+                "material4": "black_onyx_metallic",
+                "sofPatternName": "headhunter_gallente", "custommaterial1": "red_berry_matt",
+                "resPathInsert": "none"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            row.sof_commands(),
+            "material?grey_tin_metallic;black_onyx_metallic;none;black_onyx_metallic\
+             :pattern?headhunter_gallente;red_berry_matt;none"
+        );
+
+        let row: MaterialSetRow =
+            serde_json::from_str(r#"{"_key": 1, "resPathInsert": "ghost"}"#).unwrap();
+        assert_eq!(row.sof_commands(), "respathinsert?ghost");
+
+        // The SDE also spells an unset value `None`.
+        let row: MaterialSetRow = serde_json::from_str(
+            r#"{"_key": 3, "material1": "None", "material2": "None", "material3": "None",
+                "material4": "None", "sofPatternName": "None", "resPathInsert": "None"}"#,
+        )
+        .unwrap();
+        assert_eq!(row.sof_commands(), "");
+
+        let row: MaterialSetRow =
+            serde_json::from_str(r#"{"_key": 2, "sofFactionName": "noh"}"#).unwrap();
+        assert_eq!(row.sof_commands(), "");
     }
 }

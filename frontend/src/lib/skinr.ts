@@ -9,7 +9,13 @@
 // pattern is. So a design becomes a DNA string plus one synthetic pattern
 // record, registered with the SOF under its own name before the build.
 
-import type { Colors, SkinrComponent, SkinrDesign, SkinrSlotConfiguration } from './types';
+import type {
+  Colors,
+  FactionSlotMaterials,
+  SkinrComponent,
+  SkinrDesign,
+  SkinrSlotConfiguration,
+} from './types';
 
 /** The SKINR material slots, in slot order. */
 const MATERIAL_SLOTS = [1, 2, 3, 4] as const;
@@ -165,4 +171,64 @@ export function skinrLook(
   };
   dna += `:pattern?${name};${materialOf(PATTERN_SLOTS[0].material)};${materialOf(PATTERN_SLOTS[1].material)}`;
   return { dna, pattern: { name, record } };
+}
+
+/**
+ * A design on its hull, for pages that list designs for many hulls: the
+ * slot mapping comes from the hull's faction.
+ */
+export function skinrLookOn(
+  ship: { dna: string; faction_id: number | null },
+  design: SkinrDesign,
+  components: Record<string, SkinrComponent>,
+  slotMaterials: FactionSlotMaterials,
+): SkinrLook {
+  const mapping = ship.faction_id != null ? slotMaterials[ship.faction_id] : undefined;
+  return skinrLook(ship.dna, design, components, mapping ?? {});
+}
+
+/** A listing's state as the Paragon Hub words it. */
+const LISTING_STATES: Record<string, string> = {
+  listed: 'Listed',
+  sold_out: 'Sold out',
+  expired: 'Expired',
+  removed: 'Removed',
+};
+
+export function listingState(state: string): string {
+  return LISTING_STATES[state] ?? state;
+}
+
+/** Who a listing is offered to. */
+export type ListingAudience =
+  | { kind: 'public' }
+  | { kind: 'character' | 'corporation' | 'alliance'; id: number };
+
+const AUDIENCES = ['character', 'corporation', 'alliance'] as const;
+
+/**
+ * Reads a listing's `target`. ESI's spec leaves its shape open, so this
+ * takes `{corporation_id: 1}`, `{corporation: 1}` and `{corporation: {id: 1}}`
+ * alike; anything without an id is public.
+ */
+export function listingAudience(target: unknown): ListingAudience {
+  if (target && typeof target === 'object') {
+    const fields = target as Record<string, unknown>;
+    for (const kind of AUDIENCES) {
+      const value = fields[`${kind}_id`] ?? fields[kind];
+      const id =
+        typeof value === 'number'
+          ? value
+          : value && typeof value === 'object'
+            ? (value as Record<string, unknown>).id
+            : undefined;
+      if (typeof id === 'number') return { kind, id };
+    }
+  }
+  return { kind: 'public' };
+}
+
+/** What is left of a component license: ESI gives a count, or nothing for unlimited. */
+export function componentRuns(runs: number | null): string {
+  return runs === null ? 'Unlimited' : `${runs} ${runs === 1 ? 'use' : 'uses'} left`;
 }

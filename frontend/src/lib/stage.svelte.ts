@@ -9,7 +9,14 @@ import type { Blueprint, EngineStage } from './viewer/engine';
 export interface StagePlacement {
   /** Horizontal shift, in viewport widths. */
   x: number;
+  /** Vertical shift, in viewport heights (a phone's ship above its text). */
+  y?: number;
   scale: number;
+  /**
+   * How much farther back the camera sits (1: as framed). Scaling the canvas
+   * cannot fit a ship wider than the canvas; pulling the camera back can.
+   */
+  framing?: number;
 }
 
 export const CENTER: StagePlacement = { x: 0, scale: 1 };

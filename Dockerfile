@@ -10,6 +10,7 @@ FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY src src
 COPY migrations migrations
+COPY assets assets
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
@@ -18,6 +19,8 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY src src
 COPY migrations migrations
+# The Open Graph cards' fonts, compiled in.
+COPY assets assets
 RUN cargo build --release --bin skinr --bin sde_import
 
 FROM debian:bookworm-slim AS runtime
@@ -26,9 +29,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/skinr /app/target/release/sde_import /usr/local/bin/
-# sde_import caches the SDE zip under storage/sde (a volume in compose).
+# sde_import caches the SDE zip under storage/sde and the API keeps game files
+# under storage/cdn-cache (volumes in compose, owned by app from here).
 RUN useradd --system --create-home --uid 10001 app \
-    && mkdir -p storage/sde \
+    && mkdir -p storage/sde storage/cdn-cache storage/og \
     && chown -R app:app /app
 USER app
 CMD ["skinr"]

@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "alg": "RS256",
+      "e": "AQAB",
+      "kid": "JWT-Signature-Key",
+      "kty": "RSA",
+      "n": "sGsrySJhsIbW-fjmOmAj_gAELufwQ8kVdMwGqDJMpRRzqmhTpxag-16Q8Ke5dQPIFIgmqRCF8tg4r_58R5BxvRswHxt7C-sI7lwhoB_MOw3XitRRiF_EeACkHiplH5RPB1wwxFHEU1NrMjKwDrIkIFxB6lJposvaOwQ18OYhNYtTlFt9MgRU5M75PvqlSM1ypiaPGbH3MtJlVaOCR8I4cvW-1GCH7-yd21lmMZMjjnfpzzhoIRHaW5id7NTJy34YDN_zUD9bhxeTW_LJUXBjDcKjGN_oW_4P2aqas1hbrOAJ2YMMOhWykD6ERrkiM8SXzHFjYpTeLc7Yp3mVSLadFw",
+      "use": "sig"
+    }
+  ]
+}

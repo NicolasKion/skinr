@@ -5,7 +5,7 @@
 //! browser often gets a copy without CORS headers. Serving them from our own
 //! origin sidesteps CORS entirely.
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -18,10 +18,10 @@ pub const DEFAULT_RESOURCES_URL: &str = "https://resources.eveonline.com";
 
 /// The build pointer (`eveclient_TQ.json`) moves with every patch; everything
 /// else is named by build or content hash and never changes.
-const MOVING_CACHE_CONTROL: &str = "public, max-age=60";
-const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+pub const MOVING_CACHE_CONTROL: &str = "public, max-age=60";
+pub const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CdnClient {
     http: reqwest::Client,
     binaries_url: String,
@@ -29,11 +29,31 @@ pub struct CdnClient {
 }
 
 /// Which of the two hosts a request goes to.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Host {
     Binaries,
     Resources,
 }
+
+/// Why an upstream file could not be fetched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FetchError {
+    /// The host does not have it (S3 answers a missing key with 403).
+    Missing,
+    /// The host could not be reached or answered with an error.
+    Upstream,
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Missing => "not on the cdn",
+            Self::Upstream => "cdn unreachable or failing",
+        })
+    }
+}
+
+impl std::error::Error for FetchError {}
 
 impl CdnClient {
     pub fn new(binaries_url: &str, resources_url: &str) -> Self {
@@ -55,40 +75,76 @@ impl CdnClient {
         )
     }
 
-    fn url(&self, host: Host, path: &str) -> String {
-        let base = match host {
+    fn base(&self, host: Host) -> &str {
+        match host {
             Host::Binaries => &self.binaries_url,
             Host::Resources => &self.resources_url,
-        };
-        format!("{base}/{path}")
+        }
+    }
+
+    fn url(&self, host: Host, path: &str) -> String {
+        format!("{}/{path}", self.base(host))
+    }
+
+    /// The host's name (`resources.eveonline.com`), which names its folder
+    /// in a disk cache.
+    pub fn host_name(&self, host: Host) -> &str {
+        let base = self.base(host);
+        let base = base.split_once("://").map_or(base, |(_, rest)| rest);
+        base.split('/').next().unwrap_or(base)
+    }
+
+    /// Sends the request for one upstream file and checks its status.
+    async fn request(&self, host: Host, path: &str) -> Result<reqwest::Response, FetchError> {
+        if !is_safe_path(path) {
+            return Err(FetchError::Missing);
+        }
+        let upstream = self
+            .http
+            .get(self.url(host, path))
+            .send()
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, path, "cdn: upstream request failed");
+                FetchError::Upstream
+            })?;
+        match upstream.status() {
+            status if status.is_success() => Ok(upstream),
+            reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::FORBIDDEN => {
+                Err(FetchError::Missing)
+            }
+            status => {
+                tracing::warn!(%status, path, "cdn: upstream error");
+                Err(FetchError::Upstream)
+            }
+        }
+    }
+
+    /// One upstream file, whole.
+    ///
+    /// # Errors
+    ///
+    /// [`FetchError::Missing`] for an unsafe path or one the host does not
+    /// have, [`FetchError::Upstream`] when the host fails.
+    pub async fn fetch(&self, host: Host, path: &str) -> Result<Bytes, FetchError> {
+        self.request(host, path)
+            .await?
+            .bytes()
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, path, "cdn: upstream body failed");
+                FetchError::Upstream
+            })
     }
 
     /// Streams one upstream file back, with its content type and a cache
     /// lifetime matching how often it can change.
     pub async fn proxy(&self, host: Host, path: &str) -> Response {
-        if !is_safe_path(path) {
-            return StatusCode::NOT_FOUND.into_response();
-        }
-
-        let upstream = match self.http.get(self.url(host, path)).send().await {
-            Ok(response) => response,
-            Err(error) => {
-                tracing::warn!(%error, path, "cdn: upstream request failed");
-                return StatusCode::BAD_GATEWAY.into_response();
-            }
+        let upstream = match self.request(host, path).await {
+            Ok(upstream) => upstream,
+            Err(FetchError::Missing) => return StatusCode::NOT_FOUND.into_response(),
+            Err(FetchError::Upstream) => return StatusCode::BAD_GATEWAY.into_response(),
         };
-
-        match upstream.status() {
-            status if status.is_success() => {}
-            reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::FORBIDDEN => {
-                // S3 answers a missing key with 403.
-                return StatusCode::NOT_FOUND.into_response();
-            }
-            status => {
-                tracing::warn!(%status, path, "cdn: upstream error");
-                return StatusCode::BAD_GATEWAY.into_response();
-            }
-        }
 
         let content_type = upstream
             .headers()
@@ -118,7 +174,7 @@ impl CdnClient {
 }
 
 /// Only plain relative paths: no traversal, queries or odd characters.
-fn is_safe_path(path: &str) -> bool {
+pub fn is_safe_path(path: &str) -> bool {
     !path.is_empty()
         && path
             .split('/')
@@ -154,6 +210,13 @@ mod tests {
         assert!(!is_safe_path("a/./b"));
         assert!(!is_safe_path("a?b=c"));
         assert!(!is_safe_path("a%2e%2e"));
+    }
+
+    #[test]
+    fn names_the_host() {
+        let cdn = CdnClient::new("https://binaries.eveonline.com/", "http://127.0.0.1:8080");
+        assert_eq!(cdn.host_name(Host::Binaries), "binaries.eveonline.com");
+        assert_eq!(cdn.host_name(Host::Resources), "127.0.0.1:8080");
     }
 
     #[test]
