@@ -116,8 +116,8 @@ services:
     pull_policy: always
     environment:
       AXUM_URL: http://skinr-api:3100
-      # Traefik terminates TLS; Caddy passes on its X-Forwarded-Proto.
-      PROTOCOL_HEADER: x-forwarded-proto
+      # The public origin, fixed: two proxies sit in front.
+      ORIGIN: ${PUBLIC_ORIGIN:-https://skinr.space}
       # Canonical links and Open Graph tags (seo.svelte).
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://skinr.space}
     depends_on:
