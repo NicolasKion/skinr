@@ -11,6 +11,7 @@ import { goto } from '$app/navigation';
 import { THUMBNAIL_INSET } from './components/ship-thumbnail.svelte';
 import { stage } from './stage.svelte';
 import type { ShipSummary } from './types';
+import { shipHref } from './urls';
 import { TRANSITION_MS } from './viewer/poses';
 
 /** How long the ship takes to pop out to the middle and the page to fade, in ms. */
@@ -97,7 +98,7 @@ export async function leapTo(ship: ShipSummary, event: MouseEvent) {
       stage.releasePin(POP_MS);
       await wait(POP_MS);
     }
-    await goto(`/ships/${ship.id}`);
+    await goto(shipHref(ship));
     await wait(SETTLE_MS);
     leap.phase = 'land';
     await wait(LAND_MS);

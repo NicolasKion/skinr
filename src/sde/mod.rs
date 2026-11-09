@@ -129,6 +129,8 @@ pub struct Ship {
     pub sof_hull: String,
     pub sof_faction: String,
     pub sof_race: String,
+    /// DNA commands of the hull's own material set, joined by `:`; empty for none.
+    pub sof_commands: String,
     /// The default livery's colors.
     pub colors: LiveryColors,
 }
@@ -141,5 +143,7 @@ pub struct ShipSkin {
     pub material_id: i32,
     pub name: String,
     pub sof_faction: String,
+    /// DNA commands after `hull:faction:race`, joined by `:`; empty for none.
+    pub sof_commands: String,
     pub colors: LiveryColors,
 }

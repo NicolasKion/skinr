@@ -1,0 +1,37 @@
+# The render worker (scripts/render-server.ts): Node, with WebGPU from the
+# `webgpu` package (Dawn) over Vulkan. Production has no GPU, so Mesa's
+# lavapipe draws on the CPU; it has the BC texture compression the runtime
+# needs.
+
+FROM node:26-trixie-slim AS modules
+WORKDIR /app
+COPY package-lock.json ./
+# Only the engine and WebGPU, at the versions the site locks.
+RUN locked() { node -p "require('/app/package-lock.json').packages['node_modules/$1'].version"; } \
+    && mkdir /render && cd /render \
+    && echo '{"type": "module"}' > package.json \
+    && npm install --ignore-scripts --no-audit --no-fund \
+        "@carbonenginejs/runtime@$(locked @carbonenginejs/runtime)" \
+        "webgpu@$(locked webgpu)"
+
+FROM node:26-trixie-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libvulkan1 mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=modules /render/package.json /render/package-lock.json ./
+COPY --from=modules /render/node_modules node_modules
+COPY scripts/render-server.ts scripts/
+COPY scripts/render scripts/render
+COPY src/lib/skinr.ts src/lib/types.ts src/lib/
+COPY src/lib/viewer src/lib/viewer
+# The CDN cache is a volume shared with the API (game_files): the same user.
+RUN useradd --system --create-home --uid 10001 app \
+    && mkdir -p storage/cdn-cache \
+    && chown -R app:app /app
+USER app
+ENV NODE_ENV=production \
+    PORT=3200 \
+    CACHE=/app/storage/cdn-cache
+EXPOSE 3200
+CMD ["node", "scripts/render-server.ts"]

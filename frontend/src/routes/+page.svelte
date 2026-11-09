@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { peek } from '#lib/peek.svelte.js';
+  import Seo from '#lib/components/seo.svelte';
+  import { shipHref } from '#lib/urls.js';
   import { untrack } from 'svelte';
   import { cubicInOut } from 'svelte/easing';
   import type { TransitionConfig } from 'svelte/transition';
@@ -7,12 +10,13 @@
   import ShipThumbnail from '#lib/components/ship-thumbnail.svelte';
   import * as Carousel from '#lib/components/ui/carousel/index.js';
   import FactionEmblem from '#lib/components/faction-emblem.svelte';
+  import PeekPanel from '#lib/components/peek-panel.svelte';
   import Logo from '#lib/components/logo.svelte';
   import { raceTint, shipBuilders } from '#lib/eve.js';
   import ShipFilters from '#lib/components/ship-filters.svelte';
   import StageAlert from '#lib/components/stage-alert.svelte';
   import { nav } from '#lib/nav.svelte.js';
-  import { CENTER, dockTarget, stage } from '#lib/stage.svelte.js';
+  import { CENTER, stage } from '#lib/stage.svelte.js';
   import { HERO_POSE } from '#lib/viewer/poses.js';
   import type { ShipSummary } from '#lib/types.js';
 
@@ -149,15 +153,18 @@
     return order.indexOf(ship.id) >= current ? 1 : -1;
   }
 
+  /** Where the preview panel shows (its `lg:` classes); below it, a card opens its ship. */
+  const PANEL_SHOWS = '(min-width: 64rem)';
+
   /**
    * A card's first click previews its ship in the dock; a click on the ship
-   * already previewed opens it. Modified clicks (new tab and so on) are left
-   * to the browser.
+   * already previewed opens it. Without the dock (a phone), it opens at once.
+   * Modified clicks (new tab and so on) are left to the browser.
    */
   function onCardClick(event: MouseEvent, ship: ShipSummary) {
     const plain =
       event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
-    if (plain && stage.ship?.id !== ship.id) {
+    if (plain && stage.ship?.id !== ship.id && matchMedia(PANEL_SHOWS).matches) {
       event.preventDefault();
       stage.show(ship, ship.dna, sideOf(ship));
       return;
@@ -268,9 +275,18 @@
   }
 </script>
 
-<svelte:head>
-  <title>skinr.space · Try on EVE ship skins</title>
-</svelte:head>
+<Seo
+  title="skinr.space"
+  description="Try every EVE Online ship skin and every SKINR design on the Paragon Hub on the real hull in 3D, right in your browser, before you buy it."
+  jsonLd={[
+    {
+      '@type': 'WebSite',
+      name: 'skinr.space',
+      url: `${data.origin}/`,
+      description: 'Try on EVE Online ship skins and SKINR designs on the real hull in 3D.',
+    },
+  ]}
+/>
 
 <svelte:window onkeydown={onKeydown} />
 
@@ -289,7 +305,7 @@
   />
 {/snippet}
 
-<main class="explorer px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10">
+<main class="px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10" style:--peek={peek.css}>
   <section class="mb-14 max-w-4xl">
     <p class="eyebrow mb-5 text-muted-foreground">
       {catalog.ships.length} hulls · SKINR market · SDE {catalog.sde_build ?? 'unknown'}
@@ -332,7 +348,7 @@
               {@const tint = ship.colors.primary ?? raceTint(ship.race_id)}
               <Carousel.Item class="basis-auto">
                 <a
-                  href="/ships/{ship.id}"
+                  href={shipHref(ship)}
                   class="group block w-52"
                   onclick={(event) => onCardClick(event, ship)}
                   style:--glow={tint}
@@ -389,32 +405,23 @@
   </div>
 </main>
 
-<!-- The peeking stage, in two layers around the canvas (z-10): its frame sits
-     behind it, its labels in front. Both are fixed, and a fixed element is its
-     own stacking context, so they cannot share one element. The frame runs
-     past the right edge so only its left corners show. -->
-<div
-  class="explorer peek peek-frame pointer-events-none fixed top-[4.5rem] right-[-3rem] bottom-3 z-0 hidden rounded-l-[2.25rem] lg:block"
-  style:--dock-tint={dockTint}
-  use:dockTarget
->
-  {#key dockLogo}
-    <div
-      class="absolute top-1/2 left-[42%] size-[min(48rem,70vh)] -translate-x-1/2 -translate-y-1/2"
-      in:swap={{ leaving: false }}
-      out:swap={{ leaving: true }}
-    >
-      {#if dockLogo}
-        <FactionEmblem url={dockLogo} tint={dockTint} opacity={0.1} class="size-full" />
-      {/if}
-    </div>
-  {/key}
-</div>
-
-{#if docked}
-  <div
-    class="explorer peek pointer-events-none fixed top-[4.5rem] right-0 bottom-3 z-20 hidden flex-col justify-between p-9 lg:flex"
-  >
+<!-- The peeking stage: the shared panel, with the faction's emblem behind
+     the ship and the docked hull's labels over it. -->
+<PeekPanel tint={dockTint}>
+  {#snippet backdrop()}
+    {#key dockLogo}
+      <div
+        class="absolute top-1/2 left-[42%] size-[min(48rem,70vh)] -translate-x-1/2 -translate-y-1/2"
+        in:swap={{ leaving: false }}
+        out:swap={{ leaving: true }}
+      >
+        {#if dockLogo}
+          <FactionEmblem url={dockLogo} tint={dockTint} opacity={0.1} class="size-full" />
+        {/if}
+      </div>
+    {/key}
+  {/snippet}
+  {#if docked}
     <!-- Labels stack in one cell, so the old one can leave while the new one arrives. -->
     <div class="grid">
       {#key docked.id}
@@ -439,49 +446,17 @@
         {/if}
       </span>
       <a
-        href="/ships/{docked.id}"
+        href={shipHref(docked)}
         class="pointer-events-auto flex items-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-transform hover:scale-[1.03]"
         onclick={() => (stage.morphId = null)}
       >
         Open <ArrowRight class="size-4" />
       </a>
     </div>
-  </div>
-{/if}
+  {/if}
+</PeekPanel>
 
 <style>
-  /* The peeking stage's width: a generous third of the screen. */
-  .explorer {
-    --peek: clamp(24rem, 34vw, 38rem);
-  }
-  .peek {
-    left: calc(100% - var(--peek));
-  }
-  .peek.right-\[-3rem\] {
-    box-shadow:
-      inset 1px 0 0 color-mix(in oklab, var(--foreground) 7%, transparent),
-      -40px 0 80px -40px var(--shadow);
-  }
-  /* Registered so the race glow fades from one race's color to the next. */
-  @property --dock-tint {
-    syntax: '<color>';
-    inherits: false;
-    initial-value: transparent;
-  }
-  .peek-frame {
-    background:
-      radial-gradient(
-        70% 55% at 40% 50%,
-        color-mix(in oklab, var(--dock-tint) 20%, transparent),
-        transparent 70%
-      ),
-      linear-gradient(
-        90deg,
-        color-mix(in oklab, var(--foreground) 5%, transparent),
-        color-mix(in oklab, var(--foreground) 1.5%, transparent) 40%
-      );
-    transition: --dock-tint 1.3s var(--ease-apple);
-  }
   /* Fades up and out as it docks into the site bar, and back on the way down. */
   .filter-row {
     transition:

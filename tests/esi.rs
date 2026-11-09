@@ -1,14 +1,18 @@
 //! The ESI client and the SKINR fetches, against a local mock of ESI on an
 //! ephemeral port.
 
+mod common;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use axum::extract::{Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
+use skinr::esi::cache;
 use skinr::esi::client::{COMPATIBILITY_DATE, EsiClient};
 use skinr::esi::skinr::{fetch_design, fetch_listings, fetch_names};
 
@@ -100,6 +104,60 @@ async fn a_rate_limited_request_waits_and_retries() {
     assert_eq!(design.name, "Pacoman");
     assert_eq!(design.tier.map(|tier| tier.level), Some(5));
     assert_eq!(calls.load(Ordering::SeqCst), 2, "one 429, then the retry");
+}
+
+#[tokio::test]
+async fn cached_answers_wait_for_expiry_then_ask_with_their_etag() {
+    let (pool, _db) = common::database().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let esi = serve(Router::new().route(
+        "/characters/{id}/cosmetics/skinr",
+        get(move |headers: HeaderMap| {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let etag = headers.get("If-None-Match").and_then(|v| v.to_str().ok());
+                if etag == Some("\"v1\"") {
+                    return (
+                        StatusCode::NOT_MODIFIED,
+                        [("ETag", "\"v1\"")],
+                        String::new(),
+                    );
+                }
+                (
+                    StatusCode::OK,
+                    [("ETag", "\"v1\"")],
+                    json!({"licenses": [{"skinr_id": "s1", "activated": false, "unactivated": 1}]})
+                        .to_string(),
+                )
+            }
+        }),
+    ))
+    .await;
+    let key = "character:1:licenses";
+    let path = "/characters/1/cosmetics/skinr";
+    let read = || async {
+        cache::get::<serde_json::Value>(&pool, &esi, key, path, Some("token"), Duration::ZERO)
+            .await
+            .unwrap()
+    };
+
+    let first = read().await;
+    assert_eq!(first["licenses"][0]["skinr_id"], "s1");
+    // Expired at once (no max-age, no floor): asked again, answered 304,
+    // and the stored copy is served.
+    let second = read().await;
+    assert_eq!(second, first);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    // Kept for a while: no request at all.
+    sqlx::query("update esi_cache set expires_at = now() + interval '1 hour'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(read().await, first);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

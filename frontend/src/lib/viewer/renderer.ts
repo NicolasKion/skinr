@@ -2,25 +2,14 @@
 // translated in the browser. The runtime is pre-alpha; every workaround for
 // a missing piece is commented where it happens.
 import { blue } from '@carbonenginejs/runtime/blue';
-import {
-  RegisterGeometryResources,
-  RegisterTextureResources,
-  RegisterShaderResources,
-  RegisterTextureArray,
-  RegisterTexturePack,
-  RegisterSolidColorTexture,
-} from '@carbonenginejs/runtime/resource';
-import { RegisterObjectResources } from '@carbonenginejs/runtime/resource/object';
+import { CjsLibrary } from '@carbonenginejs/runtime/core';
 import { CjsWebgpuFormat } from '@carbonenginejs/runtime/resource/formats/webgpu';
-import { CjsPngFormat } from '@carbonenginejs/runtime/resource/formats/png';
-import { ImageIO } from '@carbonenginejs/runtime/resource/imageio';
-import { SetEffectPathDefaults } from '@carbonenginejs/runtime/utils';
-import { CjsSchema } from '@carbonenginejs/runtime/schema';
+import imageDecodeModule from '@carbonenginejs/runtime/workers/image-decode.worker.bundle.js?url';
+import compressionModule from '@carbonenginejs/runtime/workers/dds-compression.worker.bundle.js?url';
 import '@carbonenginejs/runtime/trinity';
 // Ships carry sound emitters; the audio classes must exist to hydrate them (audio stays headless).
 import '@carbonenginejs/runtime/audio/trinity';
 import {
-  TriDevice,
   Tr2RenderContext_GetMainThreadRenderContext,
   TriView,
   TriProjection,
@@ -32,9 +21,11 @@ import { CjsWebgpuDevice } from '@carbonenginejs/runtime/trinityal/webgpu';
 import { CjsWebgpuRenderContextAL, CjsWebgpuRenderTarget } from 'cjs-webgpu-internal';
 
 import { placement } from './placement';
-import { readBytes, type FileIndexLibrary } from './resources';
+import { buildShip } from './ship';
+import type { GameFiles } from './resources';
 import {
   FIELD_OF_VIEW,
+  FRAMING_RADII,
   HERO_POSE,
   REST_PITCH,
   REST_YAW,
@@ -55,6 +46,31 @@ import { encodePng } from './png';
 /** A Caldari region backdrop: sun direction, ambient and reflection maps. */
 const DEFAULT_SCENE = 'res:/dx9/scene/universe/c01_cube.red';
 
+/** How often Blue is pumped while the scene loads, before the frame loop runs. */
+const PUMP_INTERVAL_MS = 16;
+
+/**
+ * The client ships dx11 effects; the runtime translates each permutation to
+ * WebGPU when it is first used.
+ */
+const EFFECTS = {
+  source: 'dx11',
+  target: 'webgpu',
+  translator: CjsWebgpuFormat,
+  permutations: 'onDemand',
+  shaderModel: 'high',
+};
+
+/**
+ * The modules BeCallbackMan imports for its jobs. The runtime's defaults
+ * point at its own source files, which the build bundles away; these are the
+ * single-file bundles it ships for that, copied as they are.
+ */
+const CALLBACK_MODULES = {
+  'image.decodeBitmap': imageDecodeModule,
+  'dds.compress': compressionModule,
+};
+
 /** EVE's textures are BC compressed; the rest only help when present. */
 const REQUIRED_FEATURE = 'texture-compression-bc';
 const OPTIONAL_FEATURES = [
@@ -68,8 +84,11 @@ const OPTIONAL_FEATURES = [
 /** Fully transparent, so the page behind the canvas shows around the ship. */
 const CLEAR_COLOR = [0, 0, 0, 0];
 
-/** How far from a ship the camera starts, in bounding-sphere radii. */
-const FRAMING_RADII = 3.2;
+/** How much one wheel step (a pixel of deltaY) changes the framing distance, exponentially. */
+const WHEEL_ZOOM = 0.002;
+/** How close and how far the wheel may take the camera, in normal framing distances. */
+const ZOOM_IN_LIMIT = 0.4;
+const ZOOM_OUT_LIMIT = 3;
 /** Radians per dragged pixel. */
 const ORBIT_SPEED = 0.008;
 /** Radians per second the camera drifts until the viewer touches it. */
@@ -89,6 +108,8 @@ interface CameraState {
 
 /** How quickly the hologram fades in and out, per second. */
 const HOLOGRAM_EASING = 3;
+/** How quickly the camera follows a new framing factor (a dock resized or entered), per second. */
+const FRAMING_EASING = 6;
 /** How quickly the missing-resource glitch comes and goes, per second. */
 const GLITCH_EASING = 6;
 
@@ -246,11 +267,10 @@ const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(r
  * that fails (not in the index, or the CDN refused it) is reported to
  * `onMissing` before the runtime gets the error.
  */
-function createSource(library: FileIndexLibrary, onMissing: (path: string, error: Error) => void) {
+function createSource(files: GameFiles, onMissing: (path: string, error: Error) => void) {
   return {
-    // Shaders keep their webgpu path; the bytes behind it are the shipped dx11 effect.
     Read: (path: string) =>
-      readBytes(library, path.replace('/effect.webgpu/', '/effect.dx11/')).catch((error: Error) => {
+      files.read(path).catch((error: Error) => {
         onMissing(path, error);
         throw error;
       }),
@@ -280,14 +300,42 @@ function clearCanvasEachScene(target: any) {
   };
 }
 
+/**
+ * Shows only the ship's hull until the returned function puts the rest back.
+ * The blueprint draws the hull's outline. A livery can add effects around it
+ * (an aurora, a particle cloud) that would widen the drawing, and with it
+ * the sheet, so the page would jump on a livery change. Effect children are
+ * set aside by swapping in an empty list (the same list goes back, so
+ * nothing is reloaded), attachments (sprites, haze, banners, spotlight
+ * cones) only draw while the ship is activated, and boosters have a switch.
+ */
+function hullOnly(ship: any) {
+  const { effectChildren, activationStrength } = ship;
+  const boosters = ship.boosters;
+  const boostersShown = boosters?.display;
+  ship.effectChildren = [];
+  ship.activationStrength = 0;
+  if (boosters) boosters.display = false;
+  return () => {
+    ship.effectChildren = effectChildren;
+    ship.activationStrength = activationStrength;
+    if (boosters) boosters.display = boostersShown;
+  };
+}
+
 /** Loads one of EVE's universe scenes, or an empty scene when it cannot. */
 async function loadScene(path: string) {
+  // Loads only advance on Blue ticks, and the frame loop that pumps them
+  // has not started yet.
+  const pump = setInterval(() => blue.os.PumpOS(), PUMP_INTERVAL_MS);
   try {
     const scene = await blue.resMan.LoadObject(path);
     if (scene instanceof EveSpaceScene) return scene;
     console.warn('Not an EveSpaceScene:', path);
   } catch (error) {
     console.warn(`Could not load ${path}`, error);
+  } finally {
+    clearInterval(pump);
   }
   return new EveSpaceScene();
 }
@@ -332,6 +380,12 @@ export class ShipRenderer {
   /** 0 is the normal render, 1 the fitting window hologram. */
   private hologramAmount = 0;
   private hologramTarget = 0;
+  /**
+   * How much farther the camera sits than the ship's framing asks: in a dock
+   * narrower than the canvas, so the ship fits the dock (stage.svelte), eased.
+   */
+  private framing = 1;
+  private framingTarget = 1;
   private hologram: Hologram | null = null;
   /** 0 is a clean picture, 1 the full missing-resource glitch. */
   private glitchAmount = 0;
@@ -415,34 +469,26 @@ export class ShipRenderer {
   private projection: any;
   private driver: any;
 
-  static async create(library: FileIndexLibrary): Promise<ShipRenderer> {
+  static async create(files: GameFiles): Promise<ShipRenderer> {
     if (!navigator.gpu) throw new Error('This browser has no WebGPU.');
     const renderer = new ShipRenderer();
-    await renderer.init(library);
+    await renderer.init(files);
     return renderer;
   }
 
-  private async init(library: FileIndexLibrary) {
-    blue.resMan.Register({
-      source: createSource(library, (path, error) => this.onMissing?.(path, error)),
-      // Formats are opt-in; without PNG, png textures (the film grain noise)
-      // fail as an unrecognized image type.
-      formats: [CjsPngFormat],
-      useWorkerLoading: false,
-    });
-    // Image decoding has its own registry since alpha.11, and Register's
-    // formats do not reach it.
-    ImageIO.registerImageHandler(CjsPngFormat);
-    RegisterGeometryResources(blue.resMan);
-    RegisterTextureResources(blue.resMan);
-    // Composite textures some hulls reference as dynamic:/ paths (the Amarr
-    // titans' plating detail arrays, for one); without these the whole frame fails.
-    RegisterTextureArray(blue.resMan);
-    RegisterTexturePack(blue.resMan);
-    RegisterSolidColorTexture(blue.resMan);
-    RegisterObjectResources(blue.resMan);
-    RegisterShaderResources(blue.resMan, { translator: CjsWebgpuFormat, permutations: 'onDemand' });
-    SetEffectPathDefaults({ platformName: 'webgpu', shaderModel: 'high' });
+  private async init(files: GameFiles) {
+    // The library's defaults register every format, resource type and object
+    // builder a ship needs (PNG, textures, geometry, composite textures, black).
+    const runtime = await new CjsLibrary({
+      resMan: {
+        source: createSource(files, (path, error) => this.onMissing?.(path, error)),
+        useWorkerLoading: false,
+      },
+      // Callbacks run on the main thread, pumped by PumpOS each frame.
+      callbackMan: { useWorkers: false },
+      callbackModules: CALLBACK_MODULES,
+      effects: EFFECTS,
+    }).Initialize({ sof: null, characterLibrary: null });
 
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('No WebGPU adapter is available.');
@@ -472,9 +518,9 @@ export class ShipRenderer {
     this.gpuDevice = webgpu.GetDevice();
     this.canvasFormat = backBuffer.GetFormat();
     this.al = new CjsWebgpuRenderContextAL({ webgpu, renderTarget: backBuffer });
-    Tr2RenderContext_GetMainThreadRenderContext().SetRenderContextAL(this.al);
-
-    this.device = new TriDevice();
+    // Starts Trinity on this backend: resources prepare on trinity.device,
+    // and Blue's ticks (PumpOS) drive the device's render jobs.
+    this.device = runtime.AttachTrinity({ renderContextAL: this.al });
     if (!this.device.CreateSimpleDevice(this.canvas, 1, 1)) {
       throw new Error('Could not create the Trinity device.');
     }
@@ -543,7 +589,7 @@ export class ShipRenderer {
       resolve();
     }
     this.removeObject(this.ship);
-    this.ship = CjsSchema.from('EveShip2', values);
+    this.ship = buildShip(values);
     this.ship.translationCurve = placement([0, 0, 0]);
     this.scene.objects.push(this.ship);
     this.target = [...(values.boundingSphereCenter ?? [0, 0, 0])];
@@ -723,7 +769,7 @@ export class ShipRenderer {
     // shows, else the main one. (Which way they glide is up to each view.)
     const watching =
       [...this.sections.values()].find((candidate) => candidate.view?.visible)?.view ?? null;
-    const zoom = watching ? (watching.pose.zoom ?? 1) / watching.scale : 1;
+    const zoom = watching ? (watching.pose.zoom ?? 1) / watching.scale : this.framing;
     const shift = watching?.shift ?? 0;
 
     // Spaced by what the camera can see, not by ship size alone: a big hull
@@ -749,7 +795,7 @@ export class ShipRenderer {
     // its length), and otherwise the spin would push one side's ship further
     // into view. It waits beside the target, out of frame, while it loads.
     const landing = this.target.map((value, axis) => value - center[axis]);
-    const incoming = CjsSchema.from('EveShip2', values);
+    const incoming = buildShip(values);
     incoming.translationCurve = placement([...landing]);
     this.scene.objects.push(incoming);
     this.slideDone = new Promise<void>((resolve) => {
@@ -875,13 +921,22 @@ export class ShipRenderer {
       distance: this.distance,
       zoom: this.zoom,
       blueprintAmount: this.blueprintAmount,
+      framing: this.framing,
     };
-    const distance = (this.shipRadius / Math.tan(BLUEPRINT_FOV / 2)) * BLUEPRINT_MARGIN;
+    // Framed by the canvas's height; a portrait canvas (a phone) is narrower
+    // than tall, so the camera backs off until the hull fits its width too,
+    // or the drawing would measure a hull cut off at the sides.
+    const aspect = this.canvas.width / Math.max(1, this.canvas.height);
+    const distance =
+      (this.shipRadius / Math.tan(BLUEPRINT_FOV / 2)) * BLUEPRINT_MARGIN * Math.max(1, 1 / aspect);
     const reads: Promise<ImageData>[] = [];
+    const showAll = hullOnly(this.ship);
     try {
       this.fov = BLUEPRINT_FOV;
       this.distance = distance;
       this.zoom = 1;
+      // Its scale comes from `distance` alone, so no page framing may add to it.
+      this.framing = 1;
       this.blueprintAmount = 0;
       for (const view of BLUEPRINT_VIEWS) {
         this.yaw = view.yaw;
@@ -892,6 +947,7 @@ export class ShipRenderer {
         reads.push(hologram.readback());
       }
     } finally {
+      showAll();
       this.fov = FIELD_OF_VIEW;
       Object.assign(this, saved);
       this.updateCamera();
@@ -1034,6 +1090,15 @@ export class ShipRenderer {
     this.glitchTarget = Math.min(1, Math.max(0, amount));
   }
 
+  /**
+   * Moves the camera back by `factor` times its framing distance (1: as
+   * framed), easing there, or at once with `instant` (a canvas nobody sees).
+   */
+  setFraming(factor: number, instant = false) {
+    this.framingTarget = Math.max(1, factor);
+    if (instant) this.framing = this.framingTarget;
+  }
+
   /** Fades toward the fitting window hologram (1) or the normal render (0). */
   setHologram(amount: number) {
     this.hologramTarget = Math.min(1, Math.max(0, amount));
@@ -1109,6 +1174,10 @@ export class ShipRenderer {
       if (progress >= 1) {
         // Land exactly; the swap that follows keeps this picture.
         this.placeSlide(this.yaw);
+        // The outgoing ship goes now, before this frame draws: with the slide
+        // over, the section views no longer place it for their own angle, and
+        // where it was left for this one can be inside theirs.
+        this.removeObject(this.ship);
         const { resolve } = this.slide;
         this.slide = null;
         resolve();
@@ -1138,6 +1207,8 @@ export class ShipRenderer {
     if (Math.abs(this.hologramTarget - this.hologramAmount) < 1e-3) {
       this.hologramAmount = this.hologramTarget;
     }
+    this.framing += (this.framingTarget - this.framing) * (1 - Math.exp(-seconds * FRAMING_EASING));
+    if (Math.abs(this.framingTarget - this.framing) < 1e-3) this.framing = this.framingTarget;
     this.glitchAmount +=
       (this.glitchTarget - this.glitchAmount) * (1 - Math.exp(-seconds * GLITCH_EASING));
     if (Math.abs(this.glitchTarget - this.glitchAmount) < 1e-3) {
@@ -1191,6 +1262,15 @@ export class ShipRenderer {
     }
   }
 
+  /**
+   * Whether the wheel zooms without ctrl: in a preview fixed to the screen
+   * (a docked panel), where the wheel has no page to scroll there.
+   */
+  private wheelZooms = false;
+  setWheelZoom(on: boolean) {
+    this.wheelZooms = on;
+  }
+
   private bindInput() {
     const canvas = this.canvas;
     canvas.style.touchAction = 'none';
@@ -1216,10 +1296,18 @@ export class ShipRenderer {
     canvas.addEventListener(
       'wheel',
       (event) => {
-        // Only zoom on purpose (ctrl/pinch or while dragging), so the page still scrolls.
-        if (!event.ctrlKey && !this.drag) return;
+        // Where the page scrolls under the canvas, only zoom on purpose
+        // (ctrl/pinch or while dragging); in a fixed preview, always.
+        if (!event.ctrlKey && !this.drag && !this.wheelZooms) return;
         event.preventDefault();
-        this.restDistance = Math.max(1, this.restDistance * Math.exp(event.deltaY * 0.002));
+        const framing = Math.max(10, this.shipRadius * FRAMING_RADII);
+        this.restDistance = Math.min(
+          framing * ZOOM_OUT_LIMIT,
+          Math.max(
+            framing * ZOOM_IN_LIMIT,
+            this.restDistance * Math.exp(event.deltaY * WHEEL_ZOOM),
+          ),
+        );
       },
       { passive: false },
     );
@@ -1278,7 +1366,7 @@ export class ShipRenderer {
     // ship keeps its size on screen while the field of view narrows.
     const blend = this.blueprintAmount;
     const fov = this.fov + (BLUEPRINT_FOV - this.fov) * blend;
-    const normalHalfHeight = this.distance * this.zoom * Math.tan(this.fov / 2);
+    const normalHalfHeight = this.distance * this.zoom * this.framing * Math.tan(this.fov / 2);
     const halfHeight = normalHalfHeight + (this.blueprintHalfHeight - normalHalfHeight) * blend;
     const distance = halfHeight / Math.tan(fov / 2);
     const c = Math.cos(this.pitch);

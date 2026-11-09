@@ -10,4 +10,6 @@ declare global {
   }
 }
 
+// Makes this file a module, which `declare global` needs.
+// oxlint-disable-next-line unicorn/require-module-specifiers
 export {};

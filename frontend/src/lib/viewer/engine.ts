@@ -1,7 +1,7 @@
-// One engine per page load: the file index, the Space Object Factory and the
+// One engine per page load: the client build, the Space Object Factory and the
 // WebGPU renderer are expensive to set up and the runtime keeps global state,
 // so every viewport shares them.
-import { openLibrary, openSof } from './resources';
+import { openGameFiles, openSof } from './resources';
 import type { ScreenRect } from './poses';
 import type { Blueprint, ShipRenderer } from './renderer';
 
@@ -68,22 +68,22 @@ export function getEngine(onStage?: (stage: EngineStage) => void): Promise<Engin
 
 async function start(): Promise<Engine> {
   report('index');
-  const library = await openLibrary();
+  const files = await openGameFiles();
 
   report('sof');
-  const sof = await openSof(library);
+  const sof = await openSof(files);
 
   report('gpu');
   // Loaded only in the browser, and only once a viewport asks for it.
   const { ShipRenderer } = await import('./renderer');
-  const renderer = await ShipRenderer.create(library);
+  const renderer = await ShipRenderer.create(files);
 
   report('ready');
   let latest = 0;
   /** The DNA last handed to the renderer: on screen, or queued to slide in. */
   let target: string | null = null;
   const ready: Engine = {
-    build: String(library.build),
+    build: files.build,
     renderer,
     registerPattern(name: string, record: object) {
       sof.dataMgr.UpdatePattern(name, record);

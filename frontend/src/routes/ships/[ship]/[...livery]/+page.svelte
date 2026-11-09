@@ -1,5 +1,7 @@
 <script lang="ts">
+  import Seo from '#lib/components/seo.svelte';
   import { ChevronDown, LoaderCircle } from '@lucide/svelte';
+  import { browser } from '$app/env';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import Blueprint from '#lib/components/blueprint.svelte';
@@ -13,6 +15,8 @@
   import ShipRail from '#lib/components/ship-rail.svelte';
   import SkinIcon from '#lib/components/skin-icon.svelte';
   import StageAlert from '#lib/components/stage-alert.svelte';
+  import ThumbnailDebug from '#lib/components/thumbnail-debug.svelte';
+  import type { Livery } from '#lib/components/livery-thumbnail.svelte';
   import { firstSentence, raceTint, shipBuilders, typeRender } from '#lib/eve.js';
   import { leapTo } from '#lib/leap.svelte.js';
   import { nav } from '#lib/nav.svelte.js';
@@ -23,23 +27,83 @@
     HERO_POSE,
     SIDE_POSE,
     type CameraPose,
+    SPHERE_SPAN,
   } from '#lib/viewer/poses.js';
   import type { ShipSummary } from '#lib/types.js';
+  import { designHref, designerHref, parseLivery, shipHref, skinHref, slugify } from '#lib/urls.js';
 
   let { data } = $props();
   const ship = $derived(data.ship);
 
-  /** The selected skin's id from `?skin=`, or null for the ship's own livery. */
-  const skinId = $derived(Number(page.url.searchParams.get('skin')) || null);
-  const skin = $derived(ship.skins.find((candidate) => candidate.id === skinId) ?? null);
-  /** The chosen player design from `?skinr=`, which replaces the livery. */
+  /** The livery the path names: `…/skins/{name}`, `…/skinr/{name}-{id}` or none. */
+  const pathLivery = $derived(parseLivery(page.params.livery ?? '') ?? { kind: 'none' as const });
+  /** The selected in-game skin, or null for the ship's own livery. */
+  const skin = $derived(
+    pathLivery.kind === 'skin'
+      ? (ship.skins.find((candidate) => slugify(candidate.name) === pathLivery.slug) ?? null)
+      : null,
+  );
+  const skinId = $derived(skin?.id ?? null);
+  /** The chosen player design, which replaces the livery. */
   const skinrs = $derived(data.skinrs);
-  const skinrId = $derived(page.url.searchParams.get('skinr'));
-  const skinrDesign = $derived(skinrs.designs.find((design) => design.id === skinrId) ?? null);
+  const skinrDesign = $derived(
+    pathLivery.kind === 'skinr'
+      ? (skinrs.designs.find((design) => design.id.startsWith(pathLivery.prefix)) ?? null)
+      : null,
+  );
+  /** The livery on the ship, as the thumbnails name it (the debug tools). */
+  const onShip = $derived<Livery>(
+    skinrDesign
+      ? { kind: 'design', ship: ship.id, design: skinrDesign.id }
+      : skinId === null
+        ? { kind: 'ship', ship: ship.id }
+        : { kind: 'skin', ship: ship.id, skin: skinId },
+  );
+  const skinrId = $derived(skinrDesign?.id ?? null);
   const look = $derived(
     skinrDesign ? skinrLook(ship.dna, skinrDesign, skinrs.components, skinrs.slot_materials) : null,
   );
   const dna = $derived(look?.dna ?? skin?.dna ?? ship.dna);
+
+  /** What search engines and link previews say about this ship, or the livery on it. */
+  const seo = $derived.by(() => {
+    const plex = new Intl.NumberFormat('en-US');
+    const crumbs: [string, string][] = [
+      ['Ships', '/'],
+      [ship.name, shipHref(ship)],
+    ];
+    if (skinrDesign) {
+      const by = skinrDesign.creator.name ? ` by ${skinrDesign.creator.name}` : '';
+      const price =
+        skinrDesign.min_price_plex !== null
+          ? ` From ${plex.format(skinrDesign.min_price_plex)} PLEX on the Paragon Hub.`
+          : '';
+      return {
+        title: `${skinrDesign.name}, a SKINR for the ${ship.name}`,
+        description: `${skinrDesign.name}${by}: a SKINR design for the ${ship.name}, on the real hull in 3D.${price}`,
+        image: `/og/skinr/${skinrDesign.id}.png`,
+        crumbs: [...crumbs, [skinrDesign.name, designHref(ship, skinrDesign)]] as [
+          string,
+          string,
+        ][],
+      };
+    }
+    if (skin) {
+      return {
+        title: `${skin.name} ${ship.name} skin`,
+        description: `The ${skin.name} skin on the ${ship.name}, on the real hull in 3D. Compare it with every other skin and SKINR design for the ${ship.name}.`,
+        image: `/og/ships/${ship.id}/skins/${skin.id}.png`,
+        crumbs: [...crumbs, [skin.name, skinHref(ship, skin)]] as [string, string][],
+      };
+    }
+    const about = firstSentence(ship.description);
+    return {
+      title: `${ship.name} skins`,
+      description: `Every skin and SKINR design for the ${ship.name}, on the real hull in 3D.${about ? ` ${about}` : ''}`,
+      image: `/og/ships/${ship.id}.png`,
+      crumbs,
+    };
+  });
   const tint = $derived(raceTint(ship.race?.id));
 
   const summary = $derived<ShipSummary>({
@@ -67,11 +131,8 @@
     // list, or from the side an arrow key points (stepping wraps around).
     const order = liveries.map((livery) => livery.id);
     stage.direction = direction ?? (order.indexOf(id) >= order.indexOf(skinId) ? 1 : -1);
-    const url = new URL(page.url.href);
-    url.searchParams.delete('skinr');
-    if (id === null) url.searchParams.delete('skin');
-    else url.searchParams.set('skin', String(id));
-    goto(url, { replace: true, reset: false });
+    const picked = id === null ? null : ship.skins.find((candidate) => candidate.id === id);
+    goto(picked ? skinHref(ship, picked) : shipHref(ship), { replace: true, reset: false });
     if (scrollTop) window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -79,15 +140,12 @@
    * Shows a player design; it slides in from the side it sits on in the list,
    * or from the side an arrow key points.
    */
-  function selectSkinr(design: { id: string }, direction?: 1 | -1) {
+  function selectSkinr(design: { id: string; name: string }, direction?: 1 | -1) {
     if (design.id === skinrId) return;
     const order = skinrs.designs.map((candidate) => candidate.id);
     const current = skinrId === null ? -1 : order.indexOf(skinrId);
     stage.direction = direction ?? (order.indexOf(design.id) >= current ? 1 : -1);
-    const url = new URL(page.url.href);
-    url.searchParams.delete('skin');
-    url.searchParams.set('skinr', design.id);
-    goto(url, { replace: true, reset: false });
+    goto(designHref(ship, design), { replace: true, reset: false });
   }
 
   /**
@@ -111,17 +169,76 @@
     more: { placement: RIGHT, pose: BLUEPRINT_POSE, dim: 0 },
   };
 
-  /** Below this width there is no room beside the text: the ship stays centred, dimmed. */
+  /** Below this width there is no room beside the text: the ship sits above it. */
   const SIDE_BY_SIDE_MIN_WIDTH = 1024;
-  const NARROW_TEXT_DIM = 0.75;
+  /**
+   * On a narrow screen the hero and profile ship sits in the upper part of
+   * the screen, above their text: its centre this far up, in screen heights,
+   * and framed so its sphere fills this much of the width.
+   */
+  const NARROW_Y = -0.22;
+  const NARROW_FILL = 0.9;
+  /**
+   * How much of the framed sphere's lower half the text keeps clear of: a
+   * hull seldom reaches the sphere's bottom, so the text may start inside it.
+   */
+  const NARROW_CLEAR = 0.75;
+  /** How far the profile's text rises over the ship while it fades, in screen heights. */
+  const NARROW_FADE = 0.25;
 
   let chapter = $state<Chapter>('hero');
-  let innerWidth = $state(1440);
+  // The browser's size from the start, so a phone never shows the wide
+  // placement for a frame before switching (the server renders the wide one).
+  let innerWidth = $state(browser ? window.innerWidth : 1440);
+  let innerHeight = $state(browser ? window.innerHeight : 900);
   const wide = $derived(innerWidth >= SIDE_BY_SIDE_MIN_WIDTH);
   const framing = $derived(CHAPTERS[chapter]);
   /** From the blueprint down, the main ship sits in the drawing. */
   const docked = $derived(chapter === 'blueprint' || chapter === 'liveries' || chapter === 'more');
-  const placement = $derived(wide ? framing.placement : CENTER);
+  /** How much of its framed size the ship keeps on a narrow screen, so it fits the width. */
+  const narrowFit = $derived(Math.min(1, (innerWidth * NARROW_FILL) / (innerHeight * SPHERE_SPAN)));
+  /** The narrow screen's placement: above the text, the camera back far enough to fit. */
+  const narrow = $derived<StagePlacement>({
+    x: 0,
+    y: NARROW_Y,
+    scale: 1,
+    framing: 1 / narrowFit,
+  });
+  const placement = $derived(wide ? framing.placement : narrow);
+
+  /**
+   * On a narrow screen the hero starts its text below the ship: where the
+   * ship's framed sphere ends, in CSS so the server renders it right too
+   * (the same sum as `shipBottom` in `measureCover`).
+   */
+  const narrowClear = `calc(100dvh * ${0.5 + NARROW_Y} + min(100dvh * ${SPHERE_SPAN}, ${NARROW_FILL * 100}vw) * ${NARROW_CLEAR / 2})`;
+
+  /**
+   * On a narrow screen the text scrolls up over the ship above it: the ship
+   * fades out while the hero's or the profile's text crosses it.
+   */
+  let heroText = $state<HTMLElement>();
+  let profileText = $state<HTMLElement>();
+  let textCover = $state(0);
+  function measureCover() {
+    if (wide) {
+      textCover = 0;
+      return;
+    }
+    const sphere = innerHeight * SPHERE_SPAN * narrowFit;
+    const centre = innerHeight * (0.5 + NARROW_Y);
+    const shipBottom = centre + (sphere / 2) * NARROW_CLEAR;
+    const shipTop = centre - sphere / 2;
+    const fade = innerHeight * NARROW_FADE;
+    textCover = Math.max(
+      0,
+      ...[heroText, profileText].map((text) => {
+        if (!text) return 0;
+        const { top, bottom } = text.getBoundingClientRect();
+        return Math.min(1, (shipBottom - top) / fade, (bottom - shipTop) / fade);
+      }),
+    );
+  }
 
   /**
    * The drawing on the sheet: this ship in the selected livery once drafted.
@@ -140,7 +257,9 @@
     stage.pose = framing.pose;
     stage.hologram = docked ? 1 : 0;
     stage.dim =
-      !wide && !docked && chapter !== 'hero' ? Math.max(framing.dim, NARROW_TEXT_DIM) : framing.dim;
+      !wide && (chapter === 'hero' || chapter === 'profile')
+        ? Math.max(framing.dim, textCover)
+        : framing.dim;
     stage.dockName = 'blueprint';
     stage.blueprintFit = docked && drawing ? { halfLength: drawing.halfLength } : null;
     stage.mode = docked ? 'dock' : 'hero';
@@ -323,11 +442,30 @@
   $effect(() => () => nav.clear());
 </script>
 
-<svelte:head>
-  <title>{ship.name} skins · skinr.space</title>
-</svelte:head>
+<Seo
+  title={seo.title}
+  description={seo.description}
+  image={seo.image}
+  jsonLd={[
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: seo.crumbs.map(([name, path], index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        name,
+        item: `${data.origin}${path}`,
+      })),
+    },
+  ]}
+/>
 
-<svelte:window bind:innerWidth onkeydown={onKeydown} />
+<svelte:window
+  bind:innerWidth
+  bind:innerHeight
+  onkeydown={onKeydown}
+  onscroll={measureCover}
+  onresize={measureCover}
+/>
 
 <!-- Behind the stage: a soft spotlight and the faction's emblem as tinted
      light. Fixed and at z-0, so the transparent canvas shows it. Kept quiet on
@@ -335,7 +473,7 @@
 <div
   class="backdrop pointer-events-none fixed inset-0 z-0 overflow-hidden"
   style:opacity={docked ? 0 : 1 - stage.dim}
-  style:transform="translateX({placement.x * 100}vw) scale({placement.scale})"
+  style:transform="translate({placement.x * 100}vw, {(placement.y ?? 0) * 100}dvh) scale({placement.scale})"
 >
   <div
     class="absolute inset-0"
@@ -368,11 +506,13 @@
   <!-- The hero: everything in it lets pointer events through to the stage
        except its controls. -->
   <section
-    class="pointer-events-none relative z-20 flex h-dvh flex-col"
+    class="pointer-events-none relative z-20 flex min-h-dvh flex-col pt-(--ship-clear) lg:h-dvh lg:pt-0"
     style:--tint={tint}
+    style:--ship-clear={narrowClear}
     use:chapterOf={'hero'}
   >
     <div
+      bind:this={heroText}
       class="mx-auto mt-auto flex w-full max-w-[90rem] flex-wrap items-end justify-between gap-8 px-6 pb-16"
     >
       <div class="intro max-w-xl">
@@ -393,11 +533,16 @@
       </div>
 
       <div class="intro intro-late pointer-events-auto flex max-w-full flex-col items-end gap-3">
-        <p class="text-sm text-foreground/80">
-          <kbd class="mr-2 hidden text-[0.7rem] text-muted-foreground/70 lg:inline">← →</kbd>
-          <span class="text-muted-foreground">Skin</span>
-          <span class="mx-1.5 text-foreground/20">/</span>{liveryName}
-        </p>
+        <div class="flex items-center gap-2">
+          <p class="text-sm text-foreground/80">
+            <kbd class="mr-2 hidden text-[0.7rem] text-muted-foreground/70 lg:inline">← →</kbd>
+            <span class="text-muted-foreground">Skin</span>
+            <span class="mx-1.5 text-foreground/20">/</span>{liveryName}
+          </p>
+          {#if page.data.debug}
+            <ThumbnailDebug livery={onShip} card={seo.image} />
+          {/if}
+        </div>
         <div
           class="picker glass w-[min(100%,26rem)] overflow-clip rounded-full py-2"
           bind:clientWidth={pickerWidth}
@@ -455,8 +600,10 @@
        half of the screen, the stage moves to the other. -->
   <div class="relative z-20" style:--tint={tint}>
     {#if ship.description}
-      <section id="profile" class="chapter" use:chapterOf={'profile'}>
-        <div class="chapter-text">
+      <section id="profile" class="chapter flex-col lg:flex-row" use:chapterOf={'profile'}>
+        <!-- On a narrow screen the ship sits here, above the text. -->
+        <div class="h-[40dvh] w-full shrink-0 lg:hidden" aria-hidden="true"></div>
+        <div class="chapter-text" bind:this={profileText}>
           <p class="reveal eyebrow mb-4" style:color={tint}>Profile</p>
           <h2 class="reveal display mb-8 text-[clamp(2.25rem,4vw,3.5rem)]">
             <span class="text-sheen">{ship.faction?.name ?? ship.race?.name ?? 'Unaffiliated'}</span
@@ -488,7 +635,11 @@
     </section>
 
     {#if wearable}
-      <section id="liveries" class="chapter relative" use:chapterOf={'liveries'}>
+      <section
+        id="liveries"
+        class="chapter relative flex-col lg:flex-row"
+        use:chapterOf={'liveries'}
+      >
         <SectionStage
           key="liveries"
           pose={FRONT_POSE}
@@ -512,13 +663,20 @@
 
           <!-- The look on the ship, from either rail. -->
           <div class="reveal mb-6 min-h-14">
-            <p class="truncate text-2xl font-semibold tracking-tight">
-              {skinrDesign?.name ?? liveryName}
-            </p>
+            <div class="flex items-center gap-2">
+              <p class="truncate text-2xl font-semibold tracking-tight">
+                {skinrDesign?.name ?? liveryName}
+              </p>
+              {#if page.data.debug}
+                <ThumbnailDebug livery={onShip} card={seo.image} />
+              {/if}
+            </div>
             <p class="mt-1 truncate text-sm text-muted-foreground">
               {#if skinrDesign}
-                SKINR by <span class="text-foreground"
-                  >{skinrDesign.creator.name ?? 'a capsuleer'}</span
+                SKINR by <a
+                  href={designerHref(skinrDesign.creator)}
+                  class="text-foreground underline-offset-4 hover:underline"
+                  >{skinrDesign.creator.name ?? 'a capsuleer'}</a
                 >{#if skinrDesign.min_price_plex !== null}{` · from ${plex.format(skinrDesign.min_price_plex)} PLEX`}{/if}
               {:else if skin}
                 In-game skin

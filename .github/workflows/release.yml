@@ -36,10 +36,17 @@ jobs:
         include:
           - service: api
             context: .
+            file: Dockerfile
           - service: frontend
             context: frontend
+            file: frontend/Dockerfile
           - service: proxy
             context: deploy
+            file: deploy/Dockerfile
+          # Draws ships in any livery for the Open Graph cards (lavapipe, no GPU).
+          - service: renderer
+            context: frontend
+            file: frontend/Dockerfile.renderer
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -51,6 +58,7 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           platforms: linux/amd64
           push: true
           tags: |

@@ -1,7 +1,13 @@
+pub mod auth;
 pub mod cdn;
 pub mod db;
+pub mod dna;
 pub mod esi;
 pub mod eve_html;
+pub mod game_files;
+pub mod og;
 pub mod sde;
 pub mod server;
 pub mod sheet;
+pub mod thumbnails;
+pub mod urls;

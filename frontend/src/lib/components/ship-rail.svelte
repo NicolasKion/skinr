@@ -3,6 +3,7 @@
   // and a carousel of cards. Each card shows the ship's thumbnail with a halo
   // in the ship's livery color on hover, its meta group as a badge when it is
   // anything but Tech I, and its class and race.
+  import { shipHref } from '#lib/urls.js';
   import CardCarousel from '#lib/components/card-carousel.svelte';
   import ShipThumbnail from '#lib/components/ship-thumbnail.svelte';
   import * as Carousel from '#lib/components/ui/carousel/index.js';
@@ -52,7 +53,7 @@
       {@const badge = other.meta_group_id != null ? metaGroups.get(other.meta_group_id) : null}
       <Carousel.Item class="basis-auto">
         <a
-          href="/ships/{other.id}"
+          href={shipHref(other)}
           class="group block w-44"
           style:--glow={other.colors.primary ?? raceTint(other.race_id)}
           onclick={(event) => onpick(other, event)}

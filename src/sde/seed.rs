@@ -60,8 +60,8 @@ pub async fn seed(pool: &PgPool, tables: &ShipTables) -> sqlx::Result<()> {
         sqlx::query(
             "insert into ships (id, name, description, group_id, race_id, meta_group_id,
                 tech_level, mass, volume, capacity, radius, sof_hull, sof_faction, sof_race,
-                color_primary, color_secondary, color_hull, faction_id)
-             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
+                color_primary, color_secondary, color_hull, faction_id, sof_commands)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)",
         )
         .bind(ship.id)
         .bind(&ship.name)
@@ -91,6 +91,7 @@ pub async fn seed(pool: &PgPool, tables: &ShipTables) -> sqlx::Result<()> {
             ship.faction_id
                 .filter(|id| tables.factions.iter().any(|faction| faction.id == *id)),
         )
+        .bind(&ship.sof_commands)
         .execute(&mut *tx)
         .await?;
     }
@@ -98,14 +99,15 @@ pub async fn seed(pool: &PgPool, tables: &ShipTables) -> sqlx::Result<()> {
     for skin in &tables.skins {
         sqlx::query(
             "insert into ship_skins (ship_id, skin_id, material_id, name, sof_faction,
-                color_primary, color_secondary, color_hull)
-             values ($1, $2, $3, $4, $5, $6, $7, $8)",
+                sof_commands, color_primary, color_secondary, color_hull)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(skin.ship_id)
         .bind(skin.skin_id)
         .bind(skin.material_id)
         .bind(&skin.name)
         .bind(&skin.sof_faction)
+        .bind(&skin.sof_commands)
         .bind(&skin.colors.primary)
         .bind(&skin.colors.secondary)
         .bind(&skin.colors.hull)

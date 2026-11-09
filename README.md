@@ -32,11 +32,12 @@ Paragon Hub.
 - API: Rust, [Axum](https://github.com/tokio-rs/axum) and
   [sqlx](https://github.com/launchbadge/sqlx) on Postgres. Ship and skin data
   come from CCP's Static Data Export, SKINR listings from ESI, and game files
-  through a `/cdn` passthrough to CCP's client CDNs.
+  from CCP's client CDNs through the API, by path (it holds the file index,
+  keeps each file on disk and serves it zstd-compressed).
 - Frontend: [SvelteKit](https://svelte.dev/docs/kit) (adapter-node), Svelte 5
   and Tailwind CSS 4
 
-One origin serves both: Caddy (or the Vite dev proxy) sends `/api` and `/cdn`
+One origin serves both: Caddy (or the Vite dev proxy) sends `/api`, `/cdn` and `/eve`
 to Axum and every page to SvelteKit.
 
 ## Run it
@@ -63,10 +64,16 @@ cd frontend && npm install && npm run dev -- --port 5200
 ## Layout
 
 - `src/sde/` the SDE import: download, parse ships, groups, races and skins, seed Postgres.
-- `src/server/` the axum router and the JSON API (`/api/ships`, `/api/ships/{id}`, `/api/health`).
-- `src/cdn.rs` the `/cdn/binaries` and `/cdn/resources` passthrough to CCP's client CDNs.
-  The browser runtime reads game files through it, because CCP's CloudFront serves
-  cached copies without CORS headers to browsers.
+- `src/server/` the axum router and the JSON API (`/api/ships`, `/api/ships/{id}`, `/api/health`),
+  thumbnails (PNG renders and WebP card copies) and each ship's file list for preloading.
+- `src/thumbnails.rs` keeps a thumbnail of every ship, in-game skin and SKINR design
+  current: asks the render worker (`frontend/scripts/render-server.ts`, Node with
+  Dawn's WebGPU) for those whose look changed.
+- `src/game_files/` game files by `res:/` path (`/cdn/build`, `/cdn/res`, `/cdn/list`):
+  the client's file index per build, and a disk cache of the files with zstd copies.
+- `src/cdn.rs` the client to CCP's client CDNs, and the raw `/cdn/binaries` and
+  `/cdn/resources` passthrough (CCP's CloudFront serves cached copies without CORS
+  headers to browsers, so the browser never fetches from it directly).
 - `migrations/` the Postgres schema.
 - `frontend/` the SvelteKit app (Tailwind v4, shadcn-svelte tooling, an Apple-style dark
   design). `src/lib/viewer/` holds the WebGPU renderer and the shared engine;
@@ -79,9 +86,9 @@ cd frontend && npm install && npm run dev -- --port 5200
 Production runs on Coolify from `compose.prod.yml`. Every merge to main
 builds the api, frontend and proxy images, pushes them to GHCR and calls the
 Coolify deploy webhook (`COOLIFY_WEBHOOK` and `COOLIFY_TOKEN` repo secrets).
-The SDE import runs before the api on each deploy. Thumbnails are rendered
-locally and synced to the `skinr_thumbnails` volume (see the top of
-`compose.prod.yml`).
+The SDE import runs before the api on each deploy. The api keeps the ship
+thumbnails on the `skinr_thumbnails` volume current through the render worker
+(see the top of `compose.prod.yml`).
 
 ## Checks
 

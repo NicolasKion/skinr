@@ -14,9 +14,10 @@
 # on every deploy and only reseeds when CCP published a new SDE build; the
 # api runs the migrations on startup.
 #
-# Ship thumbnails are rendered on a machine with a GPU
-# (frontend/scripts/render-thumbnails.ts) and live on the external
-# skinr_thumbnails volume. Create it once and copy them in:
+# Ship thumbnails live on the external skinr_thumbnails volume; the api
+# keeps them current through the render worker (src/thumbnails.rs), drawing
+# only the ships whose look changed. The worker draws on the CPU, so a first
+# full pass takes a while; copying a set in once saves it:
 #   docker volume create skinr_thumbnails
 #   rsync -a storage/thumbnails/ root@<server>:/var/lib/docker/volumes/skinr_thumbnails/_data/
 #
@@ -55,8 +56,24 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       ESI_USER_AGENT: ${ESI_USER_AGENT:-skinr.space/0.1 (+https://skinr.space)}
       ESI_SYNC: ${ESI_SYNC:-1}
+      # Log in with EVE; login is off while these are empty.
+      EVE_CLIENT_ID: ${EVE_CLIENT_ID:-}
+      EVE_CLIENT_SECRET: ${EVE_CLIENT_SECRET:-}
+      EVE_CALLBACK_URL: ${EVE_CALLBACK_URL:-https://skinr.space/eve/callback}
+      # The site's origin, for the sitemap's absolute URLs.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://skinr.space}
+      # Draws the ship thumbnails and the Open Graph cards' liveries.
+      RENDERER_URL: http://skinr-renderer:3200
+      # As many thumbnails in flight as the renderer has workers.
+      THUMBNAIL_CONCURRENCY: ${RENDER_WORKERS:-2}
+      OG_CACHE_DIR: /app/storage/og
     volumes:
-      - thumbnails:/app/storage/thumbnails:ro
+      # Ship thumbnails, kept current by the api (src/thumbnails.rs).
+      - thumbnails:/app/storage/thumbnails
+      # Game files fetched from CCP once, each with a zstd copy (game_files).
+      - cdn-cache:/app/storage/cdn-cache
+      # Rendered Open Graph cards and ship renders.
+      - og-cache:/app/storage/og
     depends_on:
       skinr-sde-import:
         condition: service_completed_successfully
@@ -77,6 +94,23 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  # The render worker (frontend/scripts/render-server.ts): the ship
+  # thumbnails and the Open Graph cards' liveries, for the api. No GPU here:
+  # Mesa's lavapipe draws on the CPU. Internal only; nothing routes to it.
+  skinr-renderer:
+    image: ghcr.io/nicolaskion/skinr-renderer:latest
+    pull_policy: always
+    environment:
+      API: http://skinr-api:3100
+      # Worker processes drawing at once, each up to MAX_RSS_MB (3 GB):
+      # sized to the server's cores and memory.
+      WORKERS: ${RENDER_WORKERS:-2}
+    volumes:
+      # The API's game file cache, the same layout.
+      - cdn-cache:/app/storage/cdn-cache
+    restart: unless-stopped
+    logging: *logging
+
   skinr-frontend:
     image: ghcr.io/nicolaskion/skinr-frontend:latest
     pull_policy: always
@@ -84,6 +118,8 @@ services:
       AXUM_URL: http://skinr-api:3100
       # Traefik terminates TLS; Caddy passes on its X-Forwarded-Proto.
       PROTOCOL_HEADER: x-forwarded-proto
+      # Canonical links and Open Graph tags (seo.svelte).
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://skinr.space}
     depends_on:
       - skinr-api
     restart: unless-stopped
@@ -107,6 +143,8 @@ networks:
 
 volumes:
   sde-cache:
+  cdn-cache:
+  og-cache:
   thumbnails:
     external: true
     name: skinr_thumbnails

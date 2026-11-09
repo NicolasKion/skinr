@@ -32,6 +32,7 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+    restart: unless-stopped
     logging: *logging
 
   # Downloads the latest SDE and seeds it, only when the build changed.
@@ -60,9 +61,26 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       # Names the app to ESI, ideally with a contact (see .env.example).
       ESI_USER_AGENT: ${ESI_USER_AGENT:-skinr.space/0.1}
+      # Log in with EVE; off until the app is registered (see .env.example).
+      EVE_CLIENT_ID: ${EVE_CLIENT_ID:-}
+      EVE_CLIENT_SECRET: ${EVE_CLIENT_SECRET:-}
+      EVE_CALLBACK_URL: ${EVE_CALLBACK_URL:-https://skinr-space.test/eve/callback}
+      # The site's origin, for the sitemap's absolute URLs.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://skinr-space.test}
+      # Draws the ship thumbnails and the Open Graph cards' liveries.
+      RENDERER_URL: http://renderer:3200
+      # As many thumbnails in flight as the renderer has workers.
+      THUMBNAIL_CONCURRENCY: ${RENDER_WORKERS:-6}
+      OG_CACHE_DIR: /app/storage/og
+      # Debug tools under /api/debug (drawing a livery's thumbnails); never in production.
+      DEBUG_TOOLS: ${DEBUG_TOOLS:-1}
     volumes:
-      # Ship thumbnails from frontend/scripts/render-thumbnails.ts, rendered on the host.
-      - ./storage/thumbnails:/app/storage/thumbnails:ro
+      # Ship thumbnails, kept current by the api (src/thumbnails.rs).
+      - thumbnails:/app/storage/thumbnails
+      # Game files fetched from CCP once, each with a zstd copy (game_files).
+      - cdn-cache:/app/storage/cdn-cache
+      # Rendered Open Graph cards and ship renders.
+      - og-cache:/app/storage/og
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,12 +94,41 @@ services:
         - { action: rebuild, path: ./migrations }
         - { action: rebuild, path: ./Cargo.toml }
         - { action: rebuild, path: ./Cargo.lock }
+        - { action: rebuild, path: ./assets }
+    logging: *logging
+
+  # The render worker (frontend/scripts/render-server.ts, Node with Dawn's
+  # WebGPU): the ship thumbnails and the Open Graph cards' liveries, for the
+  # API. Internal only, no port published. It draws with lavapipe on the CPU,
+  # like production.
+  renderer:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.renderer
+    environment:
+      API: http://api:3100
+      # Worker processes drawing at once, each up to MAX_RSS_MB (3 GB).
+      WORKERS: ${RENDER_WORKERS:-6}
+    volumes:
+      # The API's game file cache, the same layout.
+      - cdn-cache:/app/storage/cdn-cache
+    restart: unless-stopped
+    develop:
+      watch:
+        - { action: rebuild, path: ./frontend/scripts }
+        - { action: rebuild, path: ./frontend/src/lib/viewer }
+        - { action: rebuild, path: ./frontend/src/lib/skinr.ts }
     logging: *logging
 
   frontend:
     build: ./frontend
     environment:
       AXUM_URL: http://api:3100
+      # Canonical links and Open Graph tags (seo.svelte); the request origin
+      # would be localhost behind portal.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://skinr-space.test}
+      # Shows the debug tools; the api needs the same switch.
+      DEBUG_TOOLS: ${DEBUG_TOOLS:-1}
     depends_on:
       - api
     restart: unless-stopped
@@ -122,4 +169,7 @@ services:
 volumes:
   postgres-data:
   sde-cache:
+  cdn-cache:
+  og-cache:
+  thumbnails:
   frontend-node-modules:

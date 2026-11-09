@@ -75,6 +75,8 @@
     display: block;
     width: 100%;
     height: 100%;
+    /* Rendered at the screen's size: a shorter host crops it, never squashes it. */
+    object-fit: cover;
     cursor: grab;
   }
   .livery-view :global(canvas:active) {

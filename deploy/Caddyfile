@@ -24,7 +24,7 @@
 		Referrer-Policy strict-origin-when-cross-origin
 	}
 
-	@axum path /api/* /cdn/*
+	@axum path /api/* /cdn/* /eve/* /og/* /sitemap.xml
 	reverse_proxy @axum {$API_HOST:api}:3100
 
 	reverse_proxy {$FRONTEND_HOST:frontend}:3000

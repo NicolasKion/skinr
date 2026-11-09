@@ -7,6 +7,14 @@ export const REST_YAW = 0.6;
 export const REST_PITCH = 0.22;
 /** The camera's vertical field of view, in radians. */
 export const FIELD_OF_VIEW = Math.PI / 4;
+/** How far from a ship the camera rests, in bounding-sphere radii. */
+export const FRAMING_RADII = 3.2;
+/**
+ * The share of the canvas height a ship's bounding sphere covers from that
+ * distance: the sphere's silhouette, which holds the whole hull, is as wide
+ * as it is tall, however the ship turns.
+ */
+export const SPHERE_SPAN = Math.tan(Math.asin(1 / FRAMING_RADII)) / Math.tan(FIELD_OF_VIEW / 2);
 
 /**
  * A camera pose. One with a `yaw` holds that angle; one without spins slowly.

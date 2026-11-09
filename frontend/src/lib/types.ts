@@ -194,13 +194,15 @@ export interface SkinrSlotConfiguration {
   };
 }
 
-/** A player-made design listed on the Paragon Hub. */
+/** A player-made design (most of them listed on the Paragon Hub). */
 export interface SkinrDesign {
   id: string;
   name: string;
   line: string | null;
   tier: number | null;
-  creator: { id: number; name: string | null };
+  /** The hull it is made for. */
+  ship_type_id: number;
+  creator: Person;
   layout: {
     slots: { id: number; configuration: SkinrSlotConfiguration }[];
     pattern_blend_mode?: string;
@@ -216,4 +218,83 @@ export interface ShipSkinrs {
   slot_materials: Record<string, number>;
   designs: SkinrDesign[];
   components: Record<string, SkinrComponent>;
+}
+
+/** A character, by id; the name is null until the API has looked it up. */
+export interface Person {
+  id: number;
+  name: string | null;
+}
+
+/** For each faction id: SKINR material slot to Trinity hull material. */
+export type FactionSlotMaterials = Record<string, Record<string, number>>;
+
+/** `/api/me`: who is logged in, and where a login starts (null: this server has none). */
+export interface Me {
+  character: { id: number; name: string } | null;
+  /** `/eve/login` on the SSO callback's origin, so the login cookie lands where the SSO returns. */
+  login: string | null;
+}
+
+/** A Paragon Hub listing of a design. */
+export interface SkinrListing {
+  id: string;
+  skinr_id: string;
+  /** `listed`, `sold_out`, `expired` or `removed`. */
+  state: string;
+  price_plex: number | null;
+  quantity: number;
+  created: string;
+  expires: string;
+  /** Who it is offered to, exactly as ESI says it. */
+  target: unknown;
+}
+
+/** A listing offered to the character privately, or to their corporation or alliance. */
+export interface SkinrOffer extends SkinrListing {
+  audience: 'character' | 'corporation' | 'alliance';
+  seller: Person;
+}
+
+/** `/api/me/skinr`: a logged-in character's SKINR, from ESI. */
+export interface MySkinr {
+  character: {
+    id: number;
+    name: string;
+    corporation_id: number | null;
+    alliance_id: number | null;
+  };
+  /** Every design the lists refer to. */
+  designs: SkinrDesign[];
+  components: Record<string, SkinrComponent>;
+  slot_materials: FactionSlotMaterials;
+  /** Ids of the designs the character made. */
+  created: string[];
+  licenses: { skinr_id: string; activated: boolean; unactivated: number }[];
+  /** One per component; `runs` is the uses left across its licenses, null for unlimited. */
+  component_licenses: { component_id: number; type: string; runs: number | null }[];
+  listings: SkinrListing[];
+  offers: SkinrOffer[];
+  /** Parts ESI could not answer this time. */
+  unavailable: string[];
+}
+
+/** A designer with designs on sale. */
+export interface Designer extends Person {
+  designs: number;
+  listings: number;
+}
+
+/** `/api/skinr`: a page of the Paragon Hub. */
+export interface HubPage {
+  designs: SkinrDesign[];
+  components: Record<string, SkinrComponent>;
+  slot_materials: FactionSlotMaterials;
+  total: number;
+  page: number;
+  page_size: number;
+  /** The designer filtered by. */
+  designer: Designer | null;
+  /** The busiest designers, when not filtering by one. */
+  designers: Designer[];
 }

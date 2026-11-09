@@ -34,7 +34,8 @@
         <th class="w-[17%] pb-2">
           <span class="flex items-center justify-end gap-1">
             <AttributeIcon name={damage.icon} size={20} />
-            {damage.label}
+            <!-- On a phone the icon names the column on its own. -->
+            <span class="hidden sm:inline">{damage.label}</span>
           </span>
         </th>
       {/each}
@@ -45,7 +46,9 @@
       <tr>
         <td class="py-3">
           <span class="flex items-center gap-2.5">
-            <AttributeIcon name={LAYER_ICONS[layer.name] ?? 'hp'} size={28} />
+            <span class="hidden sm:contents">
+              <AttributeIcon name={LAYER_ICONS[layer.name] ?? 'hp'} size={28} />
+            </span>
             <span>
               <span class="block text-sm font-medium text-white">{layer.name}</span>
               {#if layer.recharge}
@@ -61,7 +64,7 @@
         </td>
         {#each DAMAGE as damage (damage.key)}
           {@const resist = layer[damage.key]}
-          <td class="py-3 pl-3 text-right">
+          <td class="py-3 pl-1.5 text-right sm:pl-3">
             <span class="text-sm text-white/90">{whole.format(resist)}%</span>
             <span class="mt-1.5 block h-1 bg-white/[0.06]">
               <span

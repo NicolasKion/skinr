@@ -15,6 +15,19 @@ export function typeRender(typeId: number, size: IconSize = 512): string {
   return `${IMAGE_SERVER}/types/${typeId}/render?size=${size}`;
 }
 
+/** A character's portrait (a JPEG). */
+export function characterPortrait(characterId: number, size: IconSize = 128): string {
+  return `${IMAGE_SERVER}/characters/${characterId}/portrait?size=${size}`;
+}
+
+export function corporationLogo(corporationId: number, size: IconSize = 64): string {
+  return `${IMAGE_SERVER}/corporations/${corporationId}/logo?size=${size}`;
+}
+
+export function allianceLogo(allianceId: number, size: IconSize = 64): string {
+  return `${IMAGE_SERVER}/alliances/${allianceId}/logo?size=${size}`;
+}
+
 /** The accent each race's pages are tinted with, by SDE race id. */
 const RACE_TINTS: Record<number, string> = {
   1: '#7fb2e5', // Caldari: steel blue

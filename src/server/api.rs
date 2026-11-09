@@ -9,6 +9,7 @@ use serde::Serialize;
 use sqlx::PgPool;
 
 use super::AppState;
+use crate::dna;
 use crate::eve_html::{self, Segment};
 use crate::sheet::{self, Sheet};
 
@@ -22,8 +23,21 @@ pub fn router() -> Router<AppState> {
         .route("/skins/{file}", get(skin_icon))
         .route("/skins/layers/{file}", get(skin_icon_layer))
         .route("/ships/{id}/skinrs", get(super::skinr::ship_skinrs))
+        .route("/ships/{id}/files", get(super::ship_files::serve))
+        .route("/skinr", get(super::skinr::browse))
+        .route("/skinr/designers", get(super::skinr::designer_list))
         .route("/skinr/icons/{file}", get(super::skinr::component_icon))
-        .route("/thumbnails/{file}", get(thumbnail))
+        .route("/me", get(super::auth::me))
+        .route("/me/skinr", get(super::me::my_skinr))
+        .route("/thumbnails/{file}", get(super::thumbnails::serve))
+        .route(
+            "/thumbnails/skins/{file}",
+            get(super::thumbnails::serve_skin),
+        )
+        .route(
+            "/thumbnails/designs/{file}",
+            get(super::thumbnails::serve_design),
+        )
         .fallback(not_found)
 }
 
@@ -109,11 +123,6 @@ fn faction_select() -> String {
     )
 }
 
-/// A ship's Space Object Factory DNA, `hull:faction:race`.
-fn dna(hull: &str, faction: &str, race: &str) -> String {
-    format!("{hull}:{faction}:{race}")
-}
-
 #[derive(Serialize)]
 struct Health {
     status: &'static str,
@@ -155,6 +164,7 @@ struct ShipRow {
     sof_hull: String,
     sof_faction: String,
     sof_race: String,
+    sof_commands: String,
     color_primary: Option<String>,
     color_secondary: Option<String>,
     color_hull: Option<String>,
@@ -207,7 +217,7 @@ async fn catalog(State(pool): State<PgPool>) -> Result<Json<Catalog>, Response> 
 
     let ships = sqlx::query_as::<_, ShipRow>(
         "select id, name, group_id, race_id, faction_id, meta_group_id, tech_level, sof_hull, sof_faction, sof_race,
-                color_primary, color_secondary, color_hull
+                sof_commands, color_primary, color_secondary, color_hull
          from ships order by name",
     )
     .fetch_all(&pool)
@@ -215,7 +225,7 @@ async fn catalog(State(pool): State<PgPool>) -> Result<Json<Catalog>, Response> 
     .map_err(database_error)?
     .into_iter()
     .map(|row| ShipSummary {
-        dna: dna(&row.sof_hull, &row.sof_faction, &row.sof_race),
+        dna: dna::livery(&row.sof_hull, &row.sof_faction, &row.sof_race, &row.sof_commands),
         id: row.id,
         name: row.name,
         group_id: row.group_id,
@@ -274,6 +284,7 @@ struct ShipDetailRow {
     sof_hull: String,
     sof_faction: String,
     sof_race: String,
+    sof_commands: String,
     color_primary: Option<String>,
     color_secondary: Option<String>,
     color_hull: Option<String>,
@@ -300,6 +311,7 @@ struct SkinRow {
     icon_colors: Option<String>,
     name: String,
     sof_faction: String,
+    sof_commands: String,
     color_primary: Option<String>,
     color_secondary: Option<String>,
     color_hull: Option<String>,
@@ -414,7 +426,7 @@ async fn ship(
                 s.race_id, r.name as race_name, s.faction_id,
                 s.meta_group_id, m.name as meta_group_name, m.color as meta_group_color,
                 s.tech_level, s.mass, s.volume, s.capacity, s.radius,
-                s.sof_hull, s.sof_faction, s.sof_race,
+                s.sof_hull, s.sof_faction, s.sof_race, s.sof_commands,
                 s.color_primary, s.color_secondary, s.color_hull
          from ships s
          join ship_groups g on g.id = s.group_id
@@ -429,7 +441,7 @@ async fn ship(
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "Ship not found."))?;
 
     let skins = sqlx::query_as::<_, SkinRow>(
-        "select skin_id, ship_skins.material_id, name, sof_faction,
+        "select skin_id, ship_skins.material_id, name, sof_faction, sof_commands,
                 color_primary, color_secondary, color_hull,
                 skin_icons.material_id is not null as has_icon, skin_icons.colors as icon_colors
          from ship_skins left join skin_icons using (material_id)
@@ -443,7 +455,12 @@ async fn ship(
     .map(|skin| Skin {
         id: skin.skin_id,
         name: skin.name,
-        dna: dna(&row.sof_hull, &skin.sof_faction, &row.sof_race),
+        dna: dna::livery(
+            &row.sof_hull,
+            &skin.sof_faction,
+            &row.sof_race,
+            &skin.sof_commands,
+        ),
         colors: Colors {
             primary: skin.color_primary,
             secondary: skin.color_secondary,
@@ -505,7 +522,12 @@ async fn ship(
         None => None,
     };
     Ok(Json(ShipDetail {
-        dna: dna(&row.sof_hull, &row.sof_faction, &row.sof_race),
+        dna: dna::livery(
+            &row.sof_hull,
+            &row.sof_faction,
+            &row.sof_race,
+            &row.sof_commands,
+        ),
         id: row.id,
         name: row.name,
         description: eve_html::plain_text(&row.description).trim().to_owned(),
@@ -599,37 +621,6 @@ pub(super) fn png_response(png: Option<Vec<u8>>, missing: &str) -> Result<Respon
         png,
     )
         .into_response())
-}
-
-/// Thumbnails are re-rendered when the look changes, so they are cached briefly.
-const THUMBNAIL_CACHE_CONTROL: &str = "public, max-age=300";
-/// The themes a thumbnail is rendered in.
-const THUMBNAIL_THEMES: [&str; 2] = ["dark", "light"];
-
-/// A ship's rendered thumbnail, by `<type id>-<theme>.png`. Only names of that
-/// shape are read, so a request can never reach outside the directory.
-async fn thumbnail(State(state): State<AppState>, Path(file): Path<String>) -> Response {
-    let valid = file
-        .strip_suffix(".png")
-        .and_then(|name| name.split_once('-'))
-        .is_some_and(|(id, theme)| id.parse::<u32>().is_ok() && THUMBNAIL_THEMES.contains(&theme));
-    if !valid {
-        return not_found().await;
-    }
-    match tokio::fs::read(state.thumbnails.join(&file)).await {
-        Ok(png) => (
-            [
-                (header::CONTENT_TYPE, HeaderValue::from_static("image/png")),
-                (
-                    header::CACHE_CONTROL,
-                    HeaderValue::from_static(THUMBNAIL_CACHE_CONTROL),
-                ),
-            ],
-            png,
-        )
-            .into_response(),
-        Err(_) => error(StatusCode::NOT_FOUND, "Thumbnail not found."),
-    }
 }
 
 /// A sheet attribute's in-game icon, by `<attribute name>.png`.

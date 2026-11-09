@@ -12,8 +12,13 @@ export function placement(position: number[]) {
  * and its first and second derivatives for motion, both zero here.
  */
 class Placement extends ITriVectorFunction {
-  constructor(readonly position: number[]) {
+  // A plain field, not a parameter property: the render worker runs this
+  // file in Node, which only strips types.
+  readonly position: number[];
+
+  constructor(position: number[]) {
     super();
+    this.position = position;
   }
 
   private at(out: number[]) {

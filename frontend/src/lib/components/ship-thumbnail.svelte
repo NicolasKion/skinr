@@ -35,6 +35,10 @@
 
   /** CCP's render, at the size the cards used before thumbnails. */
   const RENDER_SIZE = 256;
+  /** The thumbnail widths the API serves as WebP (src/server/thumbnails.rs). */
+  const WEBP_WIDTHS = [256, 512];
+  /** How wide the cards draw a thumbnail, for `sizes`. */
+  const CARD_WIDTH = '13rem';
   /** The emblem watermark's strength: present, but well behind the ship. */
   const EMBLEM_OPACITY = 0.12;
 
@@ -59,8 +63,16 @@
       />
     {/if}
   </div>
+  <!-- WebP copies at the card's width on 1x and 2x screens (the API makes
+       them from the 512 px render), fetched as cards scroll into view. -->
   <img
-    src="/api/thumbnails/{id}-{theme.current}.png"
+    src="/api/thumbnails/{id}-{theme.current}-{WEBP_WIDTHS[1]}.webp"
+    srcset={WEBP_WIDTHS.map(
+      (width) => `/api/thumbnails/${id}-${theme.current}-${width}.webp ${width}w`,
+    ).join(', ')}
+    sizes={CARD_WIDTH}
+    loading="lazy"
+    decoding="async"
     alt=""
     class="relative object-contain p-[8%] {className}"
     data-thumbnail

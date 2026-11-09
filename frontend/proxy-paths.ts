@@ -2,4 +2,4 @@
 // docker and production: keep both in sync when a prefix changes.
 
 // Paths Axum owns outright: every method proxies to the API.
-export const axumPrefixes = ['/api', '/cdn'];
+export const axumPrefixes = ['/api', '/cdn', '/eve', '/og', '/sitemap.xml'];

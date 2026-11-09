@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{CACHE_CONTROL, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH, USER_AGENT};
 use reqwest::{RequestBuilder, Response, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -106,6 +106,51 @@ impl EsiClient {
         Ok(response.json().await?)
     }
 
+    /// GETs `path` for the cache (`super::cache`): with an access token for
+    /// authed routes, and with the stored ETag so an unchanged answer is a
+    /// cheap 304.
+    pub async fn fetch(
+        &self,
+        path: &str,
+        bearer: Option<&str>,
+        etag: Option<&str>,
+    ) -> Result<Fetched, Error> {
+        let url = format!("{}{path}", self.base_url);
+        let response = self
+            .send(|| {
+                let mut request = self.http.get(&url);
+                if let Some(token) = bearer {
+                    request = request.bearer_auth(token);
+                }
+                if let Some(etag) = etag {
+                    request = request.header(IF_NONE_MATCH, etag);
+                }
+                request
+            })
+            .await?;
+        let headers = response.headers();
+        let etag = headers
+            .get(ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let max_age = headers
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok())
+            .and_then(max_age);
+        if response.status() == StatusCode::NOT_MODIFIED {
+            return Ok(Fetched {
+                body: None,
+                etag,
+                max_age,
+            });
+        }
+        Ok(Fetched {
+            body: Some(response.text().await?),
+            etag,
+            max_age,
+        })
+    }
+
     async fn send(&self, request: impl Fn() -> RequestBuilder) -> Result<Response, Error> {
         let mut attempt = 0;
         loop {
@@ -132,7 +177,8 @@ impl EsiClient {
                 tokio::time::sleep(wait).await;
                 continue;
             }
-            if !status.is_success() {
+            // A 304 only comes back to a conditional request (`fetch`).
+            if !status.is_success() && status != StatusCode::NOT_MODIFIED {
                 return Err(Error::Status(
                     status,
                     response.text().await.unwrap_or_default(),
@@ -152,6 +198,27 @@ impl EsiClient {
     }
 }
 
+/// What a conditional GET brought back.
+#[derive(Debug)]
+pub struct Fetched {
+    /// The body, or `None` for a 304 (the cached copy is still current).
+    pub body: Option<String>,
+    pub etag: Option<String>,
+    /// How long ESI keeps this answer (`Cache-Control: max-age`).
+    pub max_age: Option<Duration>,
+}
+
+/// The `max-age` of a `Cache-Control` header.
+fn max_age(cache_control: &str) -> Option<Duration> {
+    cache_control.split(',').find_map(|directive| {
+        let (name, value) = directive.trim().split_once('=')?;
+        name.trim()
+            .eq_ignore_ascii_case("max-age")
+            .then(|| value.trim().parse::<u64>().ok())?
+            .map(Duration::from_secs)
+    })
+}
+
 fn seconds_header(headers: &HeaderMap, name: &str) -> Option<Duration> {
     headers
         .get(name)?
@@ -161,4 +228,20 @@ fn seconds_header(headers: &HeaderMap, name: &str) -> Option<Duration> {
         .parse::<u64>()
         .ok()
         .map(Duration::from_secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_age_is_read_from_cache_control() {
+        assert_eq!(
+            max_age("public, max-age=3600"),
+            Some(Duration::from_secs(3600))
+        );
+        assert_eq!(max_age("Max-Age = 5"), Some(Duration::from_secs(5)));
+        assert_eq!(max_age("no-cache"), None);
+        assert_eq!(max_age("max-age=soon"), None);
+    }
 }
