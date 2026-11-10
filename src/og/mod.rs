@@ -9,6 +9,7 @@
 
 mod cards;
 mod fonts;
+mod hexagon;
 mod pages;
 mod renders;
 mod svg;
@@ -42,7 +43,7 @@ const PORTRAIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// The portrait size fetched for a 128 px circle.
 const PORTRAIT_SIZE: u32 = 256;
 /// Bump to draw every card again after a change to the layout.
-const CARD_VERSION: u32 = 1;
+const CARD_VERSION: u32 = 2;
 
 /// Whether a card is the one its page should have, or a stand-in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,7 +261,7 @@ mod tests {
             tint: svg::Color::constant("#e0875a"),
             art: cards::Art::None,
             portrait: None,
-            swatches: Vec::new(),
+            badge: None,
             figure: None,
         }));
         let image = image::load_from_memory(&png).unwrap();

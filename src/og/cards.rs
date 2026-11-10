@@ -1,9 +1,11 @@
 //! The one card layout every page shares, in the site's dark look: the
-//! mark top left, a block of type bottom left (eyebrow in the race tint, the
-//! name in big display type, a line under it, then swatches or a figure),
-//! and the art on the right over a glow of the tint.
+//! mark top left, a portrait or a livery's SKIN badge above a block of type
+//! bottom left (eyebrow in the race tint, the name in big display type, a
+//! line under it, then a figure), and the art on the right over a glow of
+//! the tint.
 
 use super::fonts::Face;
+use super::hexagon::Badge;
 use super::svg::{Color, Svg, Type, fit};
 
 /// Open Graph's recommended card size.
@@ -16,7 +18,7 @@ const FOREGROUND: &str = "#f5f5f7";
 const MUTED: &str = "#86868b";
 /// Big type fades from the foreground to this (`--sheen-end`).
 const SHEEN_END: &str = "#8e8e93";
-/// Hairline rings around swatches and portraits (`--glass-edge`, flattened).
+/// The hairline ring around portraits (`--glass-edge`, flattened).
 const EDGE: &str = "#2a2a2e";
 /// The tint's share at the middle and the edge of the glow behind the art
 /// (`--race-backdrop-core`, `--race-backdrop-edge`).
@@ -42,9 +44,10 @@ const GLOW_RADIUS: f64 = 440.0;
 /// A portrait's radius and centre height.
 const PORTRAIT_RADIUS: f64 = 64.0;
 const PORTRAIT_Y: f64 = 220.0;
-/// A swatch's radius and the distance between swatch centres.
-const SWATCH_RADIUS: f64 = 16.0;
-const SWATCH_STEP: f64 = 44.0;
+/// A livery badge's size; it sits where a portrait would.
+const BADGE_SIZE: f64 = 136.0;
+/// The badge's grid (64 units) leaves one unit of room left of the hexagon.
+const BADGE_INSET: f64 = 1.0 / 64.0;
 
 /// What a card shows on its right.
 #[derive(Debug, Clone, Default)]
@@ -67,9 +70,9 @@ pub struct Card {
     pub tint: Color,
     pub art: Art,
     pub portrait: Option<Vec<u8>>,
-    /// Livery colours, drawn as swatches along the bottom.
-    pub swatches: Vec<Color>,
-    /// A figure along the bottom, after the swatches: a price, a count.
+    /// A livery's SKIN badge, where a portrait would be.
+    pub badge: Option<Badge>,
+    /// A figure along the bottom: a price, a count.
     pub figure: Option<String>,
 }
 
@@ -120,6 +123,14 @@ pub fn draw(card: &Card) -> String {
             PORTRAIT_RADIUS,
             portrait,
             EDGE,
+        );
+    }
+    if let Some(badge) = &card.badge {
+        svg.badge(
+            MARGIN - BADGE_SIZE * BADGE_INSET,
+            PORTRAIT_Y - BADGE_SIZE / 2.0,
+            BADGE_SIZE,
+            badge,
         );
     }
 
@@ -179,26 +190,10 @@ pub fn draw(card: &Card) -> String {
     }
 
     let footer_y = f64::from(HEIGHT) - 72.0;
-    let mut x = MARGIN + SWATCH_RADIUS;
-    for color in &card.swatches {
-        svg.circle(x, footer_y - 10.0, SWATCH_RADIUS, color.as_str(), EDGE);
-        x += SWATCH_STEP;
-    }
     if let Some(figure) = &card.figure {
-        let start = if card.swatches.is_empty() {
-            MARGIN
-        } else {
-            x - SWATCH_RADIUS + 8.0
-        };
-        let (figure, size) = fit(
-            figure,
-            Face::SemiBold,
-            0.0,
-            width - (start - MARGIN),
-            &[28.0, 24.0],
-        );
+        let (figure, size) = fit(figure, Face::SemiBold, 0.0, width, &[28.0, 24.0]);
         svg.text(
-            start,
+            MARGIN,
             footer_y,
             &figure,
             Type {
@@ -252,7 +247,7 @@ mod tests {
             tint: Color::constant("#e0875a"),
             art: Art::None,
             portrait: None,
-            swatches: vec![Color::constant("#aa4422")],
+            badge: None,
             figure: Some("100 PLEX".into()),
         }
     }
@@ -264,7 +259,6 @@ mod tests {
         assert!(svg.contains("Rifter &lt;script&gt;"));
         assert!(svg.contains("by Alice &amp; Bob"));
         assert!(svg.contains("#e0875a"));
-        assert!(svg.contains("#aa4422"));
         assert!(svg.contains("100 PLEX"));
         assert!(svg.contains(WORDMARK));
     }

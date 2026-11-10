@@ -108,7 +108,9 @@ theme or tooling, do what it does.
   import reads back off their icon (`src/sde/skin_icon_colors.rs`), SKINR
   designs their materials' swatch colors plus their patterns; the 64 px icon
   (`/api/skins/{material}.png`) is only the fallback.
-  `#lib/components/skin-icon.svelte` picks.
+  `#lib/components/skin-icon.svelte` picks. Skin and SKINR design share
+  cards carry the same badge, drawn by `src/og/hexagon.rs`, a port of
+  `skin-hexagon.svelte`: change the two together.
 - A resource read that fails is reported by the renderer (`onMissing`) and
   collected in `stage.missing`; a broken ship glitches (the same post pass,
   `setGlitch`) and `#lib/components/stage-alert.svelte` says why. The runtime
