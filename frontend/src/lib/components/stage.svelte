@@ -206,6 +206,8 @@
   let shown = $state<Geometry>(FULL);
   let anchored = $state(false);
   let move: { from: Geometry; start: number } | null = null;
+  /** Whether a glide is under way (`move`, for the framing to follow). */
+  let gliding = $state(false);
 
   const same = (a: Geometry, b: Geometry) =>
     a.tx === b.tx &&
@@ -247,6 +249,7 @@
         : { ...shown };
       anchored = false;
       move = glides ? { from, start: performance.now() } : null;
+      gliding = glides;
     });
   });
 
@@ -261,7 +264,10 @@
       } else if (move) {
         const t = Math.min(1, (now - move.start) / TRANSITION_MS);
         next = blend(move.from, target, easeInOut(t));
-        if (t >= 1) move = null;
+        if (t >= 1) {
+          move = null;
+          gliding = false;
+        }
         anchored = false;
       } else if (!visible) {
         // Fading out: stay exactly where it was (still scrolling with the
@@ -292,11 +298,11 @@
    */
   let settled = $state(false);
   $effect(() => {
-    if (!visible) {
-      settled = false;
-      return;
-    }
-    const frame = requestAnimationFrame(() => (settled = true));
+    // Only a stage out of sight for a whole frame counts as gone: leaving the
+    // explorer for a ship's page drops its dock a moment before the page asks
+    // for the hero, and the ship must glide out of the dock, not jump.
+    const now = visible;
+    const frame = requestAnimationFrame(() => (settled = now));
     return () => cancelAnimationFrame(frame);
   });
 
@@ -379,12 +385,16 @@
     engine?.renderer.setBlueprint(leaping ? null : blueprintHalfHeight);
   });
   // In a dock the camera pulls back so the ship fits the dock (place).
+  // During a glide it moves in step with the clip, or the ship would outgrow
+  // the dock's outline on its way out; a stage appearing frames its ship at
+  // once, like it places it.
   $effect(() => {
-    // A stage appearing frames its ship at once, like it places it.
-    engine?.renderer.setFraming(
-      held.frame,
-      untrack(() => !settled),
-    );
+    if (gliding) engine?.renderer.setFraming(shown.frame, true);
+    else
+      engine?.renderer.setFraming(
+        held.frame,
+        untrack(() => !settled),
+      );
   });
 
   // The wheel zooms in a preview fixed to the screen (the explorer's and the
