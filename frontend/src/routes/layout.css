@@ -335,7 +335,7 @@ html[data-peek-static] .peek-handle {
   animation: none;
 }
 
-/* Moving between the site's areas (+layout.svelte, PAGE_ORDER), the page
+/* Moving between the site's areas (page-transitions.ts), the page
    slides a little the way the site bar reads. */
 html[data-nav='area-forward']::view-transition-old(root) {
   animation: 300ms var(--ease-apple) both vt-area-out-left;
@@ -375,28 +375,28 @@ html[data-nav='area-back']::view-transition-new(root) {
 }
 
 /* A designer's portrait, name and count morph between the hub's chip and
-   their page's header (data-morph, +layout.svelte): the old page clears out
-   at once and the new one fades in only once they have landed, so the list
-   never runs under them. Placed after the area slides, which it replaces. */
-html[data-morph]::view-transition-old(root) {
+   their page's header (page-transitions.ts): the old page clears out at
+   once and the new one fades in only once they have landed, so the list
+   never runs under them. */
+html[data-nav='morph']::view-transition-old(root) {
   animation: 180ms var(--ease-apple) both vt-fade-out;
 }
-html[data-morph]::view-transition-new(root) {
+html[data-nav='morph']::view-transition-new(root) {
   animation: 380ms var(--ease-apple) var(--vt-move) both vt-fade-in;
 }
 
 /* Explorer and ship page sit side by side: the page shifts over in step with
    the stage sweeping from its peeking panel to full screen. */
-html[data-nav='forward']::view-transition-old(root) {
+html[data-nav='sweep-forward']::view-transition-old(root) {
   animation: 700ms var(--ease-apple) both vt-shift-out-left;
 }
-html[data-nav='forward']::view-transition-new(root) {
+html[data-nav='sweep-forward']::view-transition-new(root) {
   animation: 800ms var(--ease-apple) both vt-shift-in-right;
 }
-html[data-nav='back']::view-transition-old(root) {
+html[data-nav='sweep-back']::view-transition-old(root) {
   animation: 600ms var(--ease-apple) both vt-shift-out-right;
 }
-html[data-nav='back']::view-transition-new(root) {
+html[data-nav='sweep-back']::view-transition-new(root) {
   animation: 800ms var(--ease-apple) both vt-shift-in-left;
 }
 

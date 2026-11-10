@@ -4,9 +4,8 @@
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
 import { skinrLookOn } from './skinr';
-import { CENTER, stage } from './stage.svelte';
+import { stage, useScene } from './stage.svelte';
 import type { FactionSlotMaterials, ShipSummary, SkinrComponent, SkinrDesign } from './types';
-import { HERO_POSE } from './viewer/poses';
 
 /** The query parameter holding the picked design. */
 const PICK_PARAM = 'skinr';
@@ -32,28 +31,28 @@ export function skinrStage(source: () => SkinrStageSource) {
   });
   const ship = $derived(picked ? (source().ships.get(picked.ship_type_id) ?? null) : null);
 
-  $effect(() => {
-    stage.mode = 'dock';
-    stage.placement = CENTER;
-    stage.pose = HERO_POSE;
-    stage.dim = 0;
-    stage.hologram = 0;
-    stage.dockName = 'dock';
-    stage.dockRadius = 32;
-  });
-  // A design for another hull slides in like a livery.
-  $effect(() => {
-    stage.slideShips = true;
-    return () => {
-      stage.slideShips = false;
-    };
-  });
-  $effect(() => {
-    if (!picked || !ship) return;
+  // The stage docks in the preview panel; a design for another hull slides
+  // in like a livery. With nothing to show (My skins logged out) the page
+  // has no panel and the stage goes with the last page.
+  useScene(() => (picked ? { place: 'peek', slideShips: true } : null));
+  const look = $derived.by(() => {
+    if (!picked || !ship) return null;
     const { components, slotMaterials } = source();
-    const look = skinrLookOn(ship, picked, components, slotMaterials);
+    return skinrLookOn(ship, picked, components, slotMaterials);
+  });
+  $effect(() => {
+    if (!look || !ship) return;
     stage.morphId = null;
     stage.show(ship, look.dna, stage.direction, look.pattern);
+  });
+  /**
+   * What the panel shows: the hull on screen, and the picked design once its
+   * look is on it. Arriving from a ship's page, that ship glides into the
+   * panel first and the pick follows, so the labels wait for it.
+   */
+  const docked = $derived({
+    ship: stage.onScreen,
+    design: look && stage.onScreenDna === look.dna ? picked : null,
   });
 
   return {
@@ -62,6 +61,9 @@ export function skinrStage(source: () => SkinrStageSource) {
     },
     get ship() {
       return ship;
+    },
+    get docked() {
+      return docked;
     },
     /** Shows a design; it slides in from the side it sits on in `order`. */
     pick(design: SkinrDesign, order: SkinrDesign[]) {

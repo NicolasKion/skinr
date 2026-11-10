@@ -1,9 +1,10 @@
 <script lang="ts">
   // The shared 3D stage. The canvas always covers the whole viewport and is
-  // never resized for a mode change: the dock is the same canvas scaled down
+  // never resized for a change of place: the dock is the same canvas scaled down
   // and masked with a rounded clip, both GPU-composited, so moving between
   // hero and dock is one smooth transform rather than a re-render at every size.
   import { onMount, untrack } from 'svelte';
+  import { describe, onScreen, step, type Presence } from '#lib/stage-machine.js';
   import { stage, type StagePlacement } from '#lib/stage.svelte.js';
   import type { Engine, ShowTransition } from '#lib/viewer/engine.js';
   import { HERO_POSE, SPHERE_SPAN, TRANSITION_MS, easeInOut } from '#lib/viewer/poses.js';
@@ -15,6 +16,8 @@
    * fits, whatever the dock's shape, with some room around it.
    */
   const DOCK_FILL = 0.85;
+  /** The dock's corner radius, in CSS pixels. */
+  const DOCK_RADIUS = 32;
   /** How far a dimmed stage fades. */
   const DIM_OPACITY = 0.85;
   /** Lift the boot screen after this long, in ms, whatever is still loading. */
@@ -29,7 +32,7 @@
     stage.status = 'starting';
     const giveUp = setTimeout(() => (stage.booted = true), BOOT_TIMEOUT);
     import('#lib/viewer/engine.js')
-      .then(({ getEngine }) => getEngine((step) => (stage.engineStage = step)))
+      .then(({ getEngine }) => getEngine((reached) => (stage.engineStage = reached)))
       .then((ready) => {
         if (!alive) return;
         // A page without a ship has nothing more to wait for.
@@ -76,22 +79,32 @@
     const dna = stage.dna;
     const shipId = stage.ship?.id ?? null;
     if (!current || !dna) return;
+    // One change at a time: a different ship asked for while the stage
+    // glides to a new place (the Paragon Hub's pick, as the ship page's hull
+    // moves into its panel) waits until it has landed, then comes in.
+    if (shownShipId !== null && shipId !== shownShipId && moving) {
+      untrack(() => stage.trace(`${stage.ship?.name} waits for the stage to land`));
+      return;
+    }
     const ship = stage.ship;
     const { leap, slideShips } = untrack(() => ({
       leap: stage.leap,
       slideShips: stage.slideShips,
     }));
     const arrive = () => {
-      if (stage.dna === dna) stage.onScreen = ship;
+      if (stage.dna !== dna) return;
+      stage.onScreen = ship;
+      stage.onScreenDna = dna;
     };
     const slides =
       shipId !== null && shownShipId !== null && (shipId === shownShipId || slideShips);
     const transition: ShowTransition =
-      leap && !leap.shown
+      leap?.phase === 'load'
         ? { kind: 'pin', rect: leap.rect }
         : slides
           ? { kind: 'slide', direction: stage.direction, onGlide: arrive }
           : { kind: 'fly' };
+    if (shipId !== shownShipId) untrack(() => stage.trace(`${ship?.name} (${transition.kind})`));
     shownShipId = shipId;
     stage.status = 'loading';
     stage.error = null;
@@ -151,9 +164,9 @@
   function place(inPage: boolean): Geometry {
     const { width: vw, height: vh } = viewport;
     const found = stage.dock;
-    if (leaping || stage.mode !== 'dock' || !found) {
+    if (leaping || !found) {
       // Full screen; a page's placement may still pull the camera back.
-      const framing = stage.mode === 'hero' && !leaping ? (stage.placement.framing ?? 1) : 1;
+      const framing = stage.place === 'hero' && !leaping ? (stage.placement.framing ?? 1) : 1;
       return framing === 1 ? FULL : { ...FULL, frame: framing };
     }
     const dock = inPage ? { ...found, x: found.pageX, y: found.pageY } : found;
@@ -186,7 +199,7 @@
       left: (dock.x - tx) / scale,
       right: vw - (dock.x + dock.width - tx) / scale,
       bottom: vh - (dock.y + dock.height - ty) / scale,
-      radius: fitted ? 0 : stage.dockRadius / scale,
+      radius: fitted ? 0 : DOCK_RADIUS / scale,
     };
   }
   /** During a leap the stage covers the viewport as is, whatever the page wants. */
@@ -194,20 +207,30 @@
   const target = $derived(place(false));
   const targetInPage = $derived(place(true));
 
+  /** Whether the ship asked for has loaded (or failed to), or none is asked for. */
+  const loaded = $derived(leaping || stage.dna === null || loadedDna === stage.dna);
+
   /**
-   * The geometry on screen, updated every frame. Moving to or from the hero
-   * glides for TRANSITION_MS, blending toward where the target is on each
-   * frame (so it keeps up with scrolling) and landing exactly on it; after
-   * that there is no easing at all. Settled in a dock that scrolls, the stage
-   * is placed in the page rather than over the viewport, so the browser
-   * scrolls it along with everything else: a fixed element repositioned from
-   * script always trails the scroll by a frame. A fixed dock keeps it fixed.
+   * Where the stage is (stage-machine.ts), stepped every frame. Settled in a
+   * dock that scrolls, the stage is placed in the page rather than over the
+   * viewport (`anchored`), so the browser scrolls it along with everything
+   * else: a fixed element repositioned from script always trails the scroll
+   * by a frame. A fixed dock keeps it fixed. A glide blends toward where its
+   * place is on each frame, so it keeps up with scrolling, and lands exactly
+   * on it.
    */
+  let presence = $state.raw<Presence<Geometry>>({ kind: 'hidden' });
+  /** The geometry on screen, updated every frame. */
   let shown = $state<Geometry>(FULL);
   let anchored = $state(false);
-  let move: { from: Geometry; start: number } | null = null;
-  /** Whether a glide is under way (`move`, for the framing to follow). */
-  let gliding = $state(false);
+
+  /**
+   * Where the stage was on screen on the last frame, in viewport terms. A
+   * glide or a hold starts from here: by the time a navigation is seen the
+   * new page may already have scrolled, and the stage's page position no
+   * longer says where it was on screen.
+   */
+  let seen: Geometry = FULL;
 
   const same = (a: Geometry, b: Geometry) =>
     a.tx === b.tx &&
@@ -232,53 +255,62 @@
     radius: from.radius + (to.radius - from.radius) * k,
   });
 
-  // A change of place glides only when the hero is one end of it; the swap
-  // between the two docks happens off screen and is instant.
-  const placeKey = $derived(`${stage.mode}:${stage.dockName}:${leaping}`);
-  let lastMode = stage.mode;
-  $effect(() => {
-    void placeKey;
-    const mode = stage.mode;
-    untrack(() => {
-      // A stage on its way out fades where it is; it does not glide.
-      const glides =
-        !leaping && visible && (lastMode === 'hero' || mode === 'hero') && lastMode !== mode;
-      lastMode = mode;
-      const from = anchored
-        ? { ...shown, tx: shown.tx - window.scrollX, ty: shown.ty - window.scrollY }
-        : { ...shown };
-      anchored = false;
-      move = glides ? { from, start: performance.now() } : null;
-      gliding = glides;
-    });
-  });
-
   onMount(() => {
     let request = 0;
     const tick = (now: number) => {
       request = requestAnimationFrame(tick);
-      let next: Geometry;
-      if (leaping) {
-        next = FULL;
-        anchored = false;
-      } else if (move) {
-        const t = Math.min(1, (now - move.start) / TRANSITION_MS);
-        next = blend(move.from, target, easeInOut(t));
-        if (t >= 1) {
-          move = null;
-          gliding = false;
-        }
-        anchored = false;
-      } else if (!visible) {
-        // Fading out: stay exactly where it was (still scrolling with the
-        // page if it was docked) rather than jumping somewhere.
-        return;
-      } else {
-        // A dock that scrolls with the page anchors the stage in it; a fixed
-        // one keeps it fixed, so nothing has to follow the scroll at all.
-        anchored = stage.mode === 'dock' && stage.dock !== null && !stage.dock.fixed;
-        next = anchored ? targetInPage : target;
+      const want = stage.place;
+      const state = step(
+        presence,
+        {
+          now,
+          want,
+          found: want === 'hero' || stage.dock !== null,
+          loaded,
+          leaping,
+          current: seen,
+        },
+        TRANSITION_MS,
+      );
+      if (state !== presence) {
+        if (state.kind !== presence.kind) stage.trace(`${describe(presence)} → ${describe(state)}`);
+        presence = state;
       }
+
+      let next = shown;
+      switch (state.kind) {
+        case 'leaping':
+          next = FULL;
+          anchored = false;
+          break;
+        case 'gliding':
+          next = blend(
+            state.from,
+            target,
+            easeInOut(Math.min(1, (now - state.start) / TRANSITION_MS)),
+          );
+          anchored = false;
+          break;
+        case 'shown':
+          anchored = stage.dock !== null && !stage.dock.fixed;
+          next = anchored ? targetInPage : target;
+          seen = target;
+          break;
+        case 'holding':
+          // Its place is gone with the last page: it waits where it was on
+          // screen, not where it was in that page.
+          next = seen;
+          anchored = false;
+          break;
+        case 'appearing':
+          // Out of sight, already where it will show.
+          next = target;
+          anchored = false;
+          break;
+        // Hidden or fading out, it stays exactly where it was (still
+        // scrolling with the page if it was docked) rather than jumping.
+      }
+      if (!anchored) seen = next;
       if (!same(next, shown)) shown = next;
     };
     request = requestAnimationFrame(tick);
@@ -290,57 +322,40 @@
     `inset(${shown.top}px ${shown.right}px ${shown.bottom}px ${shown.left}px round ${shown.radius}px)`,
   );
 
+  /** Whether the stage is seen: on its place or on its way, or a leap's ship once loaded. */
+  const visible = $derived(
+    presence.kind === 'leaping' ? stage.leap?.phase !== 'load' : onScreen(presence),
+  );
+  const gliding = $derived(presence.kind === 'gliding');
   /**
-   * Whether placement changes animate. A stage nobody sees (the explorer on a
-   * phone, which has no panel) places itself at once, and keeps doing so for
-   * a frame after it shows, so it appears where it belongs rather than
-   * gliding there from wherever it was left.
+   * Whether the stage is on its way to a new place: gliding, waiting for the
+   * place to be laid out, or about to set off (the page has just asked).
    */
-  let settled = $state(false);
-  $effect(() => {
-    // Only a stage out of sight for a whole frame counts as gone: leaving the
-    // explorer for a ship's page drops its dock a moment before the page asks
-    // for the hero, and the ship must glide out of the dock, not jump.
-    const now = visible;
-    const frame = requestAnimationFrame(() => (settled = now));
-    return () => cancelAnimationFrame(frame);
-  });
-
-  /** Whether the page wants the stage seen. */
-  const wanted = $derived(
-    stage.leap
-      ? stage.leap.shown
-      : stage.mode === 'hero' || (stage.mode === 'dock' && stage.dock !== null),
+  const moving = $derived(
+    gliding ||
+      presence.kind === 'holding' ||
+      (presence.kind === 'shown' && stage.place !== null && stage.place !== presence.place),
   );
   /**
-   * A stage that appears (on a ship's page after a phone's explorer, which
-   * has none) stays out of sight until its ship has loaded: meanwhile the
-   * canvas holds a half-streamed hull, or the previous one. Once shown it
-   * stays shown, and later ships and liveries arrive the usual way.
+   * Whether placement changes take effect at once instead of easing: out of
+   * sight, and on the first frame back in sight, so a stage appears where it
+   * belongs rather than gliding there from wherever it was left.
    */
-  let waiting = $state(false);
-  let wasWanted = false;
-  $effect(() => {
-    const now = wanted;
-    const pending = !leaping && stage.dna !== null && loadedDna !== stage.dna;
-    untrack(() => {
-      if (now && !wasWanted && pending) waiting = true;
-      else if (!now || !pending) waiting = false;
-      wasWanted = now;
-    });
-  });
-  const visible = $derived(wanted && !waiting);
+  const instant = $derived(
+    presence.kind !== 'leaping' && (!visible || (presence.kind === 'shown' && presence.fresh)),
+  );
+
   /**
    * The hero's shift beside the page, its dimming and the camera's pull-back
-   * (only the hero moves beside the page; the dock has its own frame). A
-   * stage on its way out keeps them as they were and only fades: a ship
-   * leaving the hero for a dock that is not there (the explorer on a phone)
-   * must not slide or grow while it goes.
+   * (only the hero moves beside the page; a dock has its own frame). A stage
+   * on its way out keeps them as they were and only fades: a ship leaving
+   * the hero for a dock that is not there (the explorer on a phone) must not
+   * slide or grow while it goes.
    */
   let held = $state({ placement: { x: 0, scale: 1 } as StagePlacement, dim: 0, frame: 1 });
   $effect(() => {
-    if (!visible && !leaping) return;
-    const hero = stage.mode === 'hero' && !leaping;
+    if (!visible && !leaping && presence.kind !== 'appearing') return;
+    const hero = stage.place === 'hero' && !leaping;
     held = {
       placement: hero ? stage.placement : { x: 0, scale: 1 },
       dim: hero ? stage.dim : 0,
@@ -374,7 +389,7 @@
   const blueprintHalfHeight = $derived.by(() => {
     const fit = stage.blueprintFit;
     const dock = stage.dock;
-    if (!fit || stage.mode !== 'dock' || !dock) return null;
+    if (!fit || !dock) return null;
     const { width: vw, height: vh } = viewport;
     const scale = Math.max(dock.width / vw, dock.height / vh);
     const pixelsPerMetre = dock.width / (fit.halfLength * 2);
@@ -393,14 +408,14 @@
     else
       engine?.renderer.setFraming(
         held.frame,
-        untrack(() => !settled),
+        untrack(() => instant),
       );
   });
 
   // The wheel zooms in a preview fixed to the screen (the explorer's and the
   // SKINR pages' panel); where the page scrolls (a ship's page) it needs ctrl.
   $effect(() => {
-    engine?.renderer.setWheelZoom(stage.mode === 'dock' && stage.dock?.fixed === true);
+    engine?.renderer.setWheelZoom(stage.dock?.fixed === true);
   });
 
   // Draw the blueprint once the ship (in this livery) is fully on stage.
@@ -428,7 +443,7 @@
 <div
   class="stage top-0 left-0 z-10 h-dvh w-screen origin-top-left {anchored ? 'absolute' : 'fixed'}"
   class:leaping
-  class:unsettled={!settled}
+  class:unsettled={instant}
   class:gone={!visible}
   class:pointer-events-none={!visible || leaping}
   class:pointer-events-auto={visible && !leaping}

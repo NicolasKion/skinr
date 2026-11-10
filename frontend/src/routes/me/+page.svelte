@@ -61,17 +61,18 @@
   }));
   const pick = (design: SkinrDesign) => picked.pick(design, order);
   const shipName = (design: SkinrDesign) => ships.get(design.ship_type_id)?.name ?? null;
-  const dockLogo = $derived(
-    picked.ship?.faction_id != null ? (factionLogos.get(picked.ship.faction_id) ?? null) : null,
-  );
+  const dockLogo = $derived.by(() => {
+    const factionId = picked.docked.ship?.faction_id;
+    return factionId != null ? (factionLogos.get(factionId) ?? null) : null;
+  });
 
   const plex = new Intl.NumberFormat('en-US');
   const date = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' });
   const price = (value: number | null) => (value === null ? null : `${plex.format(value)} PLEX`);
 
-  /** What the dock says under the picked design's name. */
+  /** What the dock says under the design's name. */
   const dockNote = $derived.by(() => {
-    const design = picked.design;
+    const design = picked.docked.design;
     if (!design) return null;
     const license = mine?.licenses.find((candidate) => candidate.skinr_id === design.id);
     if (license) {
@@ -353,7 +354,12 @@
     </main>
 
     {#if picked.design}
-      <SkinrDock design={picked.design} ship={picked.ship} logoUrl={dockLogo} note={dockNote} />
+      <SkinrDock
+        design={picked.docked.design}
+        ship={picked.docked.ship}
+        logoUrl={dockLogo}
+        note={dockNote}
+      />
     {/if}
   </div>
 {:else}

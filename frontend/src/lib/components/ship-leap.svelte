@@ -3,7 +3,8 @@
   // the ship loads over its card it only holds the page still; as the ship
   // pops out it fades the page away, and it lifts off the new page at the
   // end. Below the site bar (z-40) and the lifted stage, above the page.
-  import { LAND_MS, POP_MS, leap } from '#lib/leap.svelte.js';
+  import { LAND_MS, POP_MS } from '#lib/leap.svelte.js';
+  import { stage } from '#lib/stage.svelte.js';
 
   /** Keeps the page from scrolling under the card while its ship loads. */
   function holdScroll(node: HTMLElement) {
@@ -19,9 +20,9 @@
   }
 </script>
 
-{#if leap.phase}
+{#if stage.leap}
   <div
-    class="leap fixed inset-0 z-30 {leap.phase}"
+    class="leap fixed inset-0 z-30 {stage.leap.phase}"
     style:--pop="{POP_MS}ms"
     style:--land="{LAND_MS}ms"
     use:holdScroll
