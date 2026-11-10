@@ -3,16 +3,23 @@
   // thumbnail, or the bare hull until it has one) on a glow in the hull's
   // race colour, its faction's emblem in the top right corner, and at the
   // bottom left its hexagon, name, hull and designer, and whatever the page
-  // adds below (price, licenses, a listing's state). Clicking it puts the
-  // design on the stage.
+  // adds below (price, licenses, a listing's state). It links to the design
+  // on its ship's page. Beside the preview panel (a wide screen) a first
+  // click puts the design on the stage instead, like the explorer's cards do
+  // a ship; a click on the design already there opens it, and so does any
+  // tap on a phone, which has no panel.
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
+  import { isPlainClick } from '#lib/clicks.js';
   import FactionEmblem from '#lib/components/faction-emblem.svelte';
   import LiveryThumbnail from '#lib/components/livery-thumbnail.svelte';
   import SkinIcon from '#lib/components/skin-icon.svelte';
   import { raceTint } from '#lib/eve.js';
   import { skinrIcon } from '#lib/skinr.js';
+  import { stage } from '#lib/stage.svelte.js';
   import type { Catalog, SkinrComponent, SkinrDesign } from '#lib/types.js';
+  import { designHref } from '#lib/urls.js';
+  import { viewport } from '#lib/viewport.svelte.js';
 
   let {
     design,
@@ -26,7 +33,9 @@
     components: Record<string, SkinrComponent>;
     /** The hull's name, when the catalog has it. */
     shipName: string | null;
+    /** Whether the design is the one on the stage. */
     selected?: boolean;
+    /** Puts the design on the stage (the preview panel). */
     onselect: () => void;
     /** Extra lines under the name. */
     children?: Snippet;
@@ -44,19 +53,33 @@
       ? (catalog?.factions.find((faction) => faction.id === ship.faction_id)?.logo_url ?? null)
       : null,
   );
+  /** The design on its ship's page; none for a hull the catalog does not have. */
+  const href = $derived(ship ? designHref(ship, design) : null);
+
+  function onclick(event: MouseEvent & { currentTarget: HTMLElement }) {
+    // A mouse click lets go of focus; keyboard clicks (detail 0) keep it.
+    if (event.detail > 0) event.currentTarget.blur();
+    const previews = viewport.wide && !selected && isPlainClick(event);
+    if (previews || !href) {
+      event.preventDefault();
+      onselect();
+      return;
+    }
+    // Opening the page: nothing here morphs into its title.
+    stage.morphId = null;
+  }
 </script>
 
-<button
-  type="button"
+<svelte:element
+  this={href ? 'a' : 'button'}
+  {href}
+  type={href ? undefined : 'button'}
+  role={href ? undefined : 'button'}
   class="tile group relative block aspect-[4/3] w-full min-w-0 overflow-hidden rounded-[1.75rem] text-left"
   class:selected
   style:--race={tint}
-  aria-pressed={selected}
-  onclick={(event) => {
-    // A mouse click lets go of focus; keyboard clicks (detail 0) keep it.
-    if (event.detail > 0) event.currentTarget.blur();
-    onselect();
-  }}
+  aria-current={selected ? 'true' : undefined}
+  {onclick}
 >
   <div class="backdrop absolute inset-0"></div>
   <LiveryThumbnail
@@ -90,7 +113,7 @@
       {/if}
     </span>
   </div>
-</button>
+</svelte:element>
 
 <style>
   .tile {
