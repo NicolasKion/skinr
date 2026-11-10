@@ -124,9 +124,10 @@
   // The stage docks in the preview panel beside the explorer; picking another
   // ship slides its hull in beside the last one.
   useScene(() => ({ place: 'peek', slideShips: true }));
-  // It opens on a featured ship.
+  // It opens on a featured ship, where there is a panel to show one (a
+  // phone has none, and does not load a ship it never shows).
   $effect(() => {
-    if (stage.ship) return;
+    if (stage.ship || !viewport.wide) return;
     const candidates = catalog.ships.filter((ship) => FEATURED.has(ship.name));
     const pick = candidates[Math.floor(Math.random() * candidates.length)] ?? catalog.ships[0];
     if (pick) stage.show(pick);

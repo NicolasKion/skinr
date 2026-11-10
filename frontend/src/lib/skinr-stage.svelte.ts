@@ -5,6 +5,7 @@ import { goto } from '$app/navigation';
 import { page } from '$app/state';
 import { skinrLookOn } from './skinr';
 import { stage, useScene } from './stage.svelte';
+import { viewport } from './viewport.svelte';
 import type { FactionSlotMaterials, ShipSummary, SkinrComponent, SkinrDesign } from './types';
 
 /** The query parameter holding the picked design. */
@@ -32,16 +33,19 @@ export function skinrStage(source: () => SkinrStageSource) {
   const ship = $derived(picked ? (source().ships.get(picked.ship_type_id) ?? null) : null);
 
   // The stage docks in the preview panel; a design for another hull slides
-  // in like a livery. With nothing to show (My skins logged out) the page
-  // has no panel and the stage goes with the last page.
-  useScene(() => (picked ? { place: 'peek', slideShips: true } : null));
+  // in like a livery. With nothing to show (My skins logged out) or no panel
+  // to show it in (a phone), the stage goes with the last page.
+  const shows = $derived(picked !== null && viewport.wide);
+  useScene(() => (shows ? { place: 'peek', slideShips: true } : null));
   const look = $derived.by(() => {
     if (!picked || !ship) return null;
     const { components, slotMaterials } = source();
     return skinrLookOn(ship, picked, components, slotMaterials);
   });
   $effect(() => {
-    if (!look || !ship) return;
+    // Without a panel nothing is built: a phone does not load a ship it
+    // never shows.
+    if (!look || !ship || !shows) return;
     stage.morphId = null;
     stage.show(ship, look.dna, stage.direction, look.pattern);
   });
