@@ -1,80 +1,53 @@
 <script lang="ts">
   import './layout.css';
+  import { dev } from '$app/env';
   import { onNavigate } from '$app/navigation';
+  import { page } from '$app/state';
   import BootScreen from '#lib/components/boot-screen.svelte';
   import ShipLeap from '#lib/components/ship-leap.svelte';
   import SiteBar from '#lib/components/site-bar.svelte';
   import Stage from '#lib/components/stage.svelte';
-  import { leap } from '#lib/leap.svelte.js';
+  import { planPage, type PageStop } from '#lib/page-transitions.js';
   import { stage } from '#lib/stage.svelte.js';
 
   let { children } = $props();
 
-  /**
-   * The pages in the order the site bar reads them (Ships, a ship, the
-   * Paragon Hub, a designer, your own skins): moving right through them the
-   * page slides in from the right, moving left from the left.
-   */
-  const PAGE_ORDER = [
-    '/',
-    '/ships/[ship]/[...livery]',
-    '/skinr',
-    '/skinr/designer/[designer]',
-    '/me',
-  ];
   /** Where the preview panel shows (its `lg:` classes). */
   const PANEL_SHOWS = '(min-width: 64rem)';
-  /** The pages with the preview panel; between two of them it stays put. */
-  const WITH_PANEL = new Set(['/', '/skinr', '/skinr/designer/[designer]', '/me']);
 
-  // Every navigation runs as a View Transition where the browser has them:
-  // the page slides or cross-fades and elements sharing a view-transition-name
-  // (a ship's name on a card and as the hero title) morph from one to the
-  // other, while the site bar, the 3D stage and a panel both pages share stay
-  // where they are (layout.css).
+  // The stage's trace goes to the console with the debug tools, or in dev.
+  $effect(() => {
+    stage.debug = dev || Boolean(page.data.debug);
+  });
+
+  // Every navigation runs as a View Transition where the browser has them,
+  // moving the page the way the table in page-transitions.ts says, while the
+  // site bar, the 3D stage and a panel both pages share stay where they are
+  // (layout.css). The stage moves itself to where the new page wants it.
   onNavigate((navigation) => {
     if (navigation.shallow && navigation.type === 'goto') return;
-
-    if (!document.startViewTransition || navigation.from?.url.href === navigation.to?.url.href) {
-      return;
-    }
-    // A filter or a livery stays on its page (a ship's livery is in its path,
-    // under the same ship); the stage animates those itself.
-    if (navigation.from?.url.pathname === navigation.to?.url.pathname) return;
-    const SHIP_PAGE = '/ships/[ship]/[...livery]';
-    if (
-      navigation.from?.route.id === SHIP_PAGE &&
-      navigation.to?.route.id === SHIP_PAGE &&
-      navigation.from.params?.ship === navigation.to.params?.ship
-    ) {
-      return;
-    }
     // A leap to a related ship runs under its own cover (ship-leap.svelte).
-    if (leap.phase) return;
+    if (!document.startViewTransition || stage.leap) return;
 
-    const from = navigation.from?.route.id ?? '';
-    const to = navigation.to?.route.id ?? '';
+    const stop = (end: typeof navigation.to): PageStop | null =>
+      end && {
+        routeId: end.route.id,
+        pathname: end.url.pathname,
+        href: end.url.href,
+        ship: end.params?.ship,
+      };
+    const from = stop(navigation.from);
+    const to = stop(navigation.to);
+    const plan = planPage(from, to, matchMedia(PANEL_SHOWS).matches);
+    if (from?.pathname !== to?.pathname) {
+      stage.trace(`navigate ${from?.pathname} → ${to?.pathname}: ${plan?.slide ?? 'in place'}`);
+    }
+    if (!plan) return;
+
     const root = document.documentElement;
-    const [fromAt, toAt] = [PAGE_ORDER.indexOf(from), PAGE_ORDER.indexOf(to)];
-    // Explorer and ship page sit side by side: opening a ship shifts the page
-    // over to the left in step with the stage sweeping out of its panel, going
-    // back the other way. A phone has no panel to sweep from, so its pages
-    // slide like any other two areas.
-    const sweeps = matchMedia(PANEL_SHOWS).matches;
-    if (sweeps && from === '/' && to === '/ships/[ship]/[...livery]') root.dataset.nav = 'forward';
-    else if (sweeps && from === '/ships/[ship]/[...livery]' && to === '/') {
-      root.dataset.nav = 'back';
-    } else if (fromAt !== -1 && toAt !== -1 && fromAt !== toAt) {
-      root.dataset.nav = toAt > fromAt ? 'area-forward' : 'area-back';
-    } else delete root.dataset.nav;
-    if (WITH_PANEL.has(from) && WITH_PANEL.has(to)) root.dataset.peekStatic = '';
+    root.dataset.nav = plan.slide;
+    if (plan.peekStatic) root.dataset.peekStatic = '';
     else delete root.dataset.peekStatic;
-    // Into or out of a designer's page, their portrait and name move between
-    // the hub's chip and the page's header; the rest waits for them to land.
-    const designer = '/skinr/designer/[designer]';
-    if ((from === '/skinr' && to === designer) || (from === designer && to === '/skinr')) {
-      root.dataset.morph = '';
-    } else delete root.dataset.morph;
 
     return new Promise((resolve) => {
       const transition = document.startViewTransition(async () => {
@@ -84,7 +57,6 @@
       transition.finished.finally(() => {
         delete root.dataset.nav;
         delete root.dataset.peekStatic;
-        delete root.dataset.morph;
       });
     });
   });
@@ -100,7 +72,8 @@
 <div class="relative">
   <!-- A leap's ship rides above its cover (ship-leap.svelte, z-30). -->
   <div
-    class="pointer-events-none absolute inset-0 overflow-clip {stage.leap?.shown
+    class="pointer-events-none absolute inset-0 overflow-clip {stage.leap &&
+    stage.leap.phase !== 'load'
       ? 'z-[35]'
       : 'z-10'}"
   >

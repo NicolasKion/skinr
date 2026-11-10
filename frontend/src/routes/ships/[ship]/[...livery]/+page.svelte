@@ -20,7 +20,7 @@
   import { firstSentence, raceTint, shipBuilders, typeRender } from '#lib/eve.js';
   import { leapTo } from '#lib/leap.svelte.js';
   import { nav } from '#lib/nav.svelte.js';
-  import { CENTER, stage, type StagePlacement } from '#lib/stage.svelte.js';
+  import { CENTER, stage, useScene, type StagePlacement } from '#lib/stage.svelte.js';
   import {
     BLUEPRINT_POSE,
     FRONT_POSE,
@@ -252,28 +252,21 @@
     return blueprint.dna === dna || sameShip ? blueprint.drawing : null;
   });
 
-  $effect(() => {
-    stage.placement = placement;
-    stage.pose = framing.pose;
-    stage.hologram = docked ? 1 : 0;
-    stage.dim =
+  // The chapter places the stage: the hero beside its text, then docked in
+  // the blueprint's side elevation from there down. The blueprint is drafted
+  // while the reader is still above it.
+  useScene(() => ({
+    place: docked ? 'blueprint' : 'hero',
+    placement,
+    pose: framing.pose,
+    hologram: docked ? 1 : 0,
+    dim:
       !wide && (chapter === 'hero' || chapter === 'profile')
         ? Math.max(framing.dim, textCover)
-        : framing.dim;
-    stage.dockName = 'blueprint';
-    stage.blueprintFit = docked && drawing ? { halfLength: drawing.halfLength } : null;
-    stage.mode = docked ? 'dock' : 'hero';
-  });
-  $effect(() => () => {
-    stage.blueprintFit = null;
-    stage.dockName = 'dock';
-  });
-
-  // Draft the blueprint while the reader is still above it.
-  $effect(() => {
-    stage.wantBlueprint = true;
-    return () => (stage.wantBlueprint = false);
-  });
+        : framing.dim,
+    fit: docked && drawing ? { halfLength: drawing.halfLength } : null,
+    draft: true,
+  }));
 
   /**
    * Where the blueprint section sits in the page. Its paper is painted

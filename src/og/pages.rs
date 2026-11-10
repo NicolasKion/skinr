@@ -5,11 +5,13 @@ use serde_json::json;
 use sqlx::PgPool;
 
 use super::cards::{Art, Card};
+use super::hexagon::{Badge, Bands, DEFAULT_LIGHTS, Hexagon, Pattern};
 use super::renders::Job;
 use super::svg::Color;
 use super::{Freshness, Og, Rendered};
 use crate::dna;
 use crate::esi::skinr::LISTED;
+use crate::sde::skin_icon_colors::IconColors;
 use crate::thumbnails::Subject;
 
 /// The accent each race's cards are tinted with, by SDE race id; the same
@@ -31,8 +33,13 @@ const DEFAULT_TINT: &str = "#a1b5c9";
 const HOME_SHIPS: [i32; 3] = [641, 638, 642];
 /// How many designs the hub and designer cards show.
 const GALLERY_DESIGNS: i64 = 3;
-/// SKINR's material slots, in slot order (primary, secondary, detailing, …).
-const MATERIAL_SLOTS: [i64; 4] = [1, 2, 3, 4];
+/// SKINR's pattern slots, each with the material slot it is painted in
+/// (`frontend/src/lib/skinr.ts`, `PATTERN_SLOTS`).
+const PATTERN_SLOTS: [(i64, i64); 2] = [(5, 6), (7, 8)];
+/// The material slots a design's badge reads: its bands and its patterns' paint.
+const BADGE_MATERIAL_SLOTS: [i64; 6] = [1, 2, 3, 4, 6, 8];
+/// The paint of a pattern whose material slot is empty (`skinr.ts`).
+const BARE_PATTERN: &str = "#d8d8d8";
 
 fn tint(race_id: Option<i32>) -> Color {
     let hex = race_id
@@ -41,15 +48,9 @@ fn tint(race_id: Option<i32>) -> Color {
     Color::constant(hex)
 }
 
-/// Colours from the database, minus any that are not `#rrggbb`.
-fn colors<'a>(hexes: impl IntoIterator<Item = Option<&'a str>>) -> Vec<Color> {
-    let mut out: Vec<Color> = Vec::new();
-    for color in hexes.into_iter().flatten().filter_map(Color::parse) {
-        if !out.contains(&color) {
-            out.push(color);
-        }
-    }
-    out
+/// A colour from the database, if it is `#rrggbb`.
+fn color(hex: Option<&str>) -> Option<Color> {
+    hex.and_then(Color::parse)
 }
 
 /// A count with thousands separators: 12,345.
@@ -77,24 +78,93 @@ fn plural(count: i64, one: &str, many: &str) -> String {
     )
 }
 
-/// The material component ids of a design's layout, in slot order.
-fn material_ids(layout: &serde_json::Value) -> Vec<i32> {
-    let slots = layout
-        .get("slots")
-        .and_then(|slots| slots.as_array())
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    MATERIAL_SLOTS
+/// The component a design's layout puts in `slot`: a `nanocoating` (a
+/// material) or a `pattern`.
+fn slot_component(layout: &serde_json::Value, slot: i64, kind: &str) -> Option<i32> {
+    layout
+        .get("slots")?
+        .as_array()?
         .iter()
-        .filter_map(|wanted| {
-            slots
-                .iter()
-                .find(|slot| slot.get("id").and_then(|id| id.as_i64()) == Some(*wanted))?
-                .pointer("/configuration/nanocoating/id")?
-                .as_i64()
-                .and_then(|id| i32::try_from(id).ok())
-        })
-        .collect()
+        .find(|candidate| candidate.get("id").and_then(serde_json::Value::as_i64) == Some(slot))?
+        .pointer(&format!("/configuration/{kind}/id"))?
+        .as_i64()
+        .and_then(|id| i32::try_from(id).ok())
+}
+
+/// A design's SKIN badge, as the site draws it (`skinrIcon` in
+/// `frontend/src/lib/skinr.ts`): its primary, secondary and detailing
+/// materials tint the bottom, top and middle bands, and each pattern is laid
+/// over it in its own material's colour. Also returns what it depends on.
+async fn design_badge(
+    pool: &PgPool,
+    layout: &serde_json::Value,
+) -> sqlx::Result<(Badge, serde_json::Value)> {
+    let materials: Vec<i32> = BADGE_MATERIAL_SLOTS
+        .iter()
+        .filter_map(|slot| slot_component(layout, *slot, "nanocoating"))
+        .collect();
+    let found: Vec<(i32, Option<String>)> =
+        sqlx::query_as("select id, color from skinr_components where id = any($1)")
+            .bind(&materials)
+            .fetch_all(pool)
+            .await?;
+    let color_of = |slot: i64| {
+        let id = slot_component(layout, slot, "nanocoating")?;
+        let (_, hex) = found.iter().find(|(found, _)| *found == id)?;
+        color(hex.as_deref())
+    };
+    let bands = Bands {
+        primary: color_of(1),
+        secondary: color_of(2).or_else(|| color_of(1)),
+        hull: color_of(3).or_else(|| color_of(4)).or_else(|| color_of(1)),
+    };
+    let mut patterns = Vec::new();
+    let mut key = Vec::new();
+    for (slot, material) in PATTERN_SLOTS {
+        let Some(id) = slot_component(layout, slot, "pattern") else {
+            continue;
+        };
+        let mask: Option<Vec<u8>> =
+            sqlx::query_scalar("select png from skinr_component_icons where component_id = $1")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?;
+        let Some(mask) = mask else { continue };
+        let paint = color_of(material).unwrap_or_else(|| Color::constant(BARE_PATTERN));
+        key.push(json!([id, paint]));
+        patterns.push(Pattern { mask, color: paint });
+    }
+    let depends_on = json!([bands, key]);
+    let badge = Badge::Hexagon(Hexagon {
+        bands,
+        lights: Color::constant(DEFAULT_LIGHTS),
+        patterns,
+    });
+    Ok((badge, depends_on))
+}
+
+/// An in-game skin's SKIN badge, as the site picks it (`skin-icon.svelte`):
+/// drawn from the colours the import read off its icon, else the client's
+/// icon itself, else drawn from the skin's material colours.
+fn skin_badge(icon_colors: Option<&str>, icon: Option<Vec<u8>>, colors: Bands) -> Badge {
+    let read: Option<IconColors> = icon_colors.and_then(|text| serde_json::from_str(text).ok());
+    match (read, icon) {
+        (Some(read), _) => Badge::Hexagon(Hexagon {
+            bands: Bands {
+                primary: Color::parse(&read.primary),
+                secondary: Color::parse(&read.secondary),
+                hull: Color::parse(&read.hull),
+            },
+            lights: Color::parse(&read.lights).unwrap_or_else(|| Color::constant(DEFAULT_LIGHTS)),
+            patterns: Vec::new(),
+        }),
+        (None, Some(png)) => Badge::Icon(png),
+        (None, None) => Badge::Hexagon(Hexagon {
+            bands: colors,
+            lights: Color::constant(DEFAULT_LIGHTS),
+            patterns: Vec::new(),
+        }),
+    }
 }
 
 /// A design ready to be drawn: its render job and what to show without one.
@@ -229,7 +299,7 @@ impl Og {
             tint: Color::constant(DEFAULT_TINT),
             art: Art::Gallery(pictures),
             portrait: None,
-            swatches: Vec::new(),
+            badge: None,
             figure: Some(format!(
                 "{} · {} · {}",
                 plural(ships, "ship", "ships"),
@@ -274,7 +344,7 @@ impl Og {
             tint: Color::constant(DEFAULT_TINT),
             art: Art::Gallery(pictures),
             portrait: None,
-            swatches: Vec::new(),
+            badge: None,
             figure: Some(format!(
                 "{} by {}",
                 plural(designs, "design", "designs"),
@@ -351,7 +421,7 @@ impl Og {
             tint: tint(race_id),
             art: thumbnail.map_or(Art::None, |(png, _)| Art::Ship(png)),
             portrait: None,
-            swatches: Vec::new(),
+            badge: None,
             figure: Some(figure),
         };
         Ok(Some(self.finish(card, freshness, &path).await))
@@ -376,11 +446,16 @@ impl Og {
             color_primary: Option<String>,
             color_secondary: Option<String>,
             color_hull: Option<String>,
+            icon_colors: Option<String>,
+            icon: Option<Vec<u8>>,
         }
         let Some(row) = sqlx::query_as::<_, Row>(
             "select s.name as ship, s.race_id, k.name, s.sof_hull, k.sof_faction, s.sof_race,
-                    k.sof_commands, k.color_primary, k.color_secondary, k.color_hull
-             from ship_skins k join ships s on s.id = k.ship_id
+                    k.sof_commands, k.color_primary, k.color_secondary, k.color_hull,
+                    i.colors as icon_colors, i.png as icon
+             from ship_skins k
+             join ships s on s.id = k.ship_id
+             left join skin_icons i on i.material_id = k.material_id
              where k.ship_id = $1 and k.skin_id = $2",
         )
         .bind(ship_id)
@@ -396,15 +471,23 @@ impl Og {
             &row.sof_race,
             &row.sof_commands,
         ));
-        let swatches = colors([
-            row.color_primary.as_deref(),
-            row.color_secondary.as_deref(),
-            row.color_hull.as_deref(),
-        ]);
+        let colors = Bands {
+            primary: color(row.color_primary.as_deref()),
+            secondary: color(row.color_secondary.as_deref()),
+            hull: color(row.color_hull.as_deref()),
+        };
         let path = self.card_path(
             "skins",
             &format!("{ship_id}_{skin_id}"),
-            &json!([row.ship, row.name, row.race_id, swatches, job.key()]),
+            &json!([
+                row.ship,
+                row.name,
+                row.race_id,
+                row.icon_colors,
+                row.icon.is_some(),
+                colors,
+                job.key()
+            ]),
         );
         if let Some(card) = Self::stored_card(&path).await {
             return Ok(Some(card));
@@ -416,7 +499,7 @@ impl Og {
             tint: tint(row.race_id),
             art: Art::None,
             portrait: None,
-            swatches,
+            badge: Some(skin_badge(row.icon_colors.as_deref(), row.icon, colors)),
             figure: None,
         };
         let own = Own {
@@ -496,18 +579,7 @@ impl Og {
         .fetch_one(pool)
         .await?;
         let layout: serde_json::Value = serde_json::from_str(&art.layout).unwrap_or_default();
-        let ids = material_ids(&layout);
-        let found: Vec<(i32, Option<String>)> =
-            sqlx::query_as("select id, color from skinr_components where id = any($1)")
-                .bind(&ids)
-                .fetch_all(pool)
-                .await?;
-        let swatches = colors(ids.iter().map(|id| {
-            found
-                .iter()
-                .find(|(found, _)| found == id)
-                .and_then(|(_, color)| color.as_deref())
-        }));
+        let (badge, badge_key) = design_badge(pool, &layout).await?;
         let job = art.job();
         let figure = row.min_price_plex.map_or_else(
             || "Not on sale".to_owned(),
@@ -523,7 +595,7 @@ impl Og {
                 row.race_id,
                 subtitle,
                 figure,
-                swatches,
+                badge_key,
                 job.key()
             ]),
         );
@@ -537,7 +609,7 @@ impl Og {
             tint: tint(row.race_id),
             art: Art::None,
             portrait: None,
-            swatches,
+            badge: Some(badge),
             figure: Some(figure),
         };
         Ok(Some(
@@ -601,7 +673,7 @@ impl Og {
                 Art::Gallery(pictures)
             },
             portrait,
-            swatches: Vec::new(),
+            badge: None,
             figure: Some(format!("{} on sale", plural(on_sale, "design", "designs"))),
         };
         Ok(Some(self.finish(card, freshness, &path).await))
@@ -631,26 +703,42 @@ mod tests {
     }
 
     #[test]
-    fn a_layout_names_its_materials_in_slot_order() {
+    fn a_layout_names_the_component_in_each_slot() {
         let layout = json!({"slots": [
             {"id": 3, "configuration": {"nanocoating": {"id": 30}}},
             {"id": 5, "configuration": {"pattern": {"id": 188}}},
             {"id": 1, "configuration": {"nanocoating": {"id": 10}}}
         ]});
-        assert_eq!(material_ids(&layout), vec![10, 30]);
-        assert_eq!(material_ids(&json!({})), Vec::<i32>::new());
+        assert_eq!(slot_component(&layout, 1, "nanocoating"), Some(10));
+        assert_eq!(slot_component(&layout, 3, "nanocoating"), Some(30));
+        assert_eq!(slot_component(&layout, 5, "pattern"), Some(188));
+        assert_eq!(slot_component(&layout, 5, "nanocoating"), None);
+        assert_eq!(slot_component(&layout, 2, "nanocoating"), None);
+        assert_eq!(slot_component(&json!({}), 1, "nanocoating"), None);
     }
 
     #[test]
-    fn colours_drop_repeats_and_junk() {
-        let got = colors([
-            Some("#AA0000"),
-            None,
-            Some("#aa0000"),
-            Some("red"),
-            Some("#00ff00"),
-        ]);
-        let got: Vec<&str> = got.iter().map(Color::as_str).collect();
-        assert_eq!(got, vec!["#aa0000", "#00ff00"]);
+    fn a_skin_badge_prefers_its_icon_colours_then_its_icon() {
+        let colors = Bands {
+            primary: Color::parse("#112233"),
+            ..Bands::default()
+        };
+        let read =
+            r##"{"primary":"#aa0000","secondary":"#00aa00","hull":"#0000aa","lights":"#ffffff"}"##;
+        let Badge::Hexagon(drawn) = skin_badge(Some(read), Some(b"png".to_vec()), colors.clone())
+        else {
+            panic!("icon colours draw a hexagon");
+        };
+        assert_eq!(drawn.bands.hull, Color::parse("#0000aa"));
+        assert_eq!(drawn.lights.as_str(), "#ffffff");
+        assert_eq!(
+            skin_badge(None, Some(b"png".to_vec()), colors.clone()),
+            Badge::Icon(b"png".to_vec())
+        );
+        let Badge::Hexagon(fallback) = skin_badge(Some("junk"), None, colors) else {
+            panic!("material colours draw a hexagon");
+        };
+        assert_eq!(fallback.bands.primary, Color::parse("#112233"));
+        assert_eq!(fallback.lights.as_str(), DEFAULT_LIGHTS);
     }
 }

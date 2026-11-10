@@ -4,8 +4,9 @@
 // has loaded the picture swaps for the live 3D ship without a visible
 // change. Then the ship pops out of the card to the middle of the screen as
 // the page fades away behind it, the new page loads under that cover, and
-// the cover lifts with the ship already in place. ship-leap.svelte draws the
-// cover; the stage lifts above it meanwhile (+layout.svelte).
+// the cover lifts with the ship already in place. The leap and its phase are
+// `stage.leap`: the stage covers the viewport meanwhile and lifts above the
+// cover ship-leap.svelte draws (+layout.svelte).
 import { tick } from 'svelte';
 import { goto } from '$app/navigation';
 import { THUMBNAIL_INSET } from './components/ship-thumbnail.svelte';
@@ -22,13 +23,6 @@ export const LAND_MS = 700;
 const SETTLE_MS = 120;
 /** Give up on the pinned ship after this long, in ms, and just open the page. */
 const LOAD_TIMEOUT = 10000;
-
-class Leap {
-  /** While a leap runs: loading the ship over its card, popping it out, or landing. */
-  phase = $state<'load' | 'pop' | 'land' | null>(null);
-}
-
-export const leap = new Leap();
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -58,7 +52,7 @@ export async function leapTo(ship: ShipSummary, event: MouseEvent) {
   if (
     !plain ||
     !picture?.complete ||
-    leap.phase ||
+    stage.leap ||
     !stage.releasePin ||
     matchMedia('(prefers-reduced-motion: reduce)').matches
   ) {
@@ -80,8 +74,7 @@ export async function leapTo(ship: ShipSummary, event: MouseEvent) {
   picture.style.transform = getComputedStyle(picture).transform;
   picture.style.transition = 'none';
 
-  leap.phase = 'load';
-  stage.leap = { rect, shown: false };
+  stage.leap = { phase: 'load', rect };
   stage.show(ship);
   try {
     // The stage takes the new ship up (its status then follows that ship).
@@ -90,21 +83,19 @@ export async function leapTo(ship: ShipSummary, event: MouseEvent) {
       () => stage.ship?.id === ship.id && (stage.status === 'ready' || stage.status === 'error'),
       LOAD_TIMEOUT,
     );
-    if (stage.status === 'ready' && stage.leap) {
+    if (stage.status === 'ready') {
       // The live ship takes the picture's place, then pops out.
-      stage.leap.shown = true;
+      stage.leap = { phase: 'pop', rect };
       picture.style.visibility = 'hidden';
-      leap.phase = 'pop';
       stage.releasePin(POP_MS);
       await wait(POP_MS);
     }
     await goto(shipHref(ship));
     await wait(SETTLE_MS);
-    leap.phase = 'land';
+    stage.leap = { phase: 'land', rect };
     await wait(LAND_MS);
   } finally {
     stage.leap = null;
-    leap.phase = null;
     picture.style.removeProperty('transform');
     picture.style.removeProperty('transition');
     picture.style.removeProperty('visibility');

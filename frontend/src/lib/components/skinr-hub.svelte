@@ -42,9 +42,10 @@
     ships,
   }));
   const shipName = (design: SkinrDesign) => ships.get(design.ship_type_id)?.name ?? null;
-  const dockLogo = $derived(
-    picked.ship?.faction_id != null ? (factionLogos.get(picked.ship.faction_id) ?? null) : null,
-  );
+  const dockLogo = $derived.by(() => {
+    const factionId = picked.docked.ship?.faction_id;
+    return factionId != null ? (factionLogos.get(factionId) ?? null) : null;
+  });
 
   const plex = new Intl.NumberFormat('en-US');
   const priceNote = (design: SkinrDesign) =>
@@ -290,10 +291,10 @@
 
   {#if picked.design}
     <SkinrDock
-      design={picked.design}
-      ship={picked.ship}
+      design={picked.docked.design}
+      ship={picked.docked.ship}
       logoUrl={dockLogo}
-      note={priceNote(picked.design)}
+      note={picked.docked.design && priceNote(picked.docked.design)}
     />
   {/if}
 </div>

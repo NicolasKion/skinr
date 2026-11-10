@@ -139,9 +139,20 @@ impl Svg {
         svg
     }
 
-    fn id(&mut self, prefix: &str) -> String {
+    /// A fresh id for something in the defs.
+    pub(super) fn id(&mut self, prefix: &str) -> String {
         self.next_id += 1;
         format!("{prefix}{}", self.next_id)
+    }
+
+    /// Adds finished markup to the defs (gradients, clips, masks, filters).
+    pub(super) fn push_defs(&mut self, markup: &str) {
+        self.defs.push_str(markup);
+    }
+
+    /// Adds finished markup to the drawing, over what is there.
+    pub(super) fn push_body(&mut self, markup: &str) {
+        self.body.push_str(markup);
     }
 
     pub fn rect(&mut self, x: f64, y: f64, width: f64, height: f64, fill: &str) {
@@ -186,13 +197,6 @@ impl Svg {
             self.body,
             r#"<image x="{x}" y="{y}" width="{size}" height="{size}" preserveAspectRatio="xMidYMid slice" clip-path="url(#{id})" href="{}"/><circle cx="{cx}" cy="{cy}" r="{radius}" fill="none" stroke="{ring}" stroke-width="2"/>"#,
             data_uri(bytes)
-        );
-    }
-
-    pub fn circle(&mut self, cx: f64, cy: f64, radius: f64, fill: &str, ring: &str) {
-        let _ = write!(
-            self.body,
-            r#"<circle cx="{cx}" cy="{cy}" r="{radius}" fill="{fill}" stroke="{ring}" stroke-width="2"/>"#
         );
     }
 

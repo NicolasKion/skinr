@@ -6,7 +6,7 @@
 //! layer is drawn, gives back that color. The frontend then draws the icon as
 //! vectors in those colors, sharp at any size, instead of the 64 px image.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The layers whose colors are read, bottom to top, in the order [`IconColors`] lists them.
 pub const LAYERS: [&str; 4] = ["main", "secondary", "hull", "lights"];
@@ -22,7 +22,7 @@ const MIN_PIXELS: usize = 4;
 
 /// A skin's colors as `#rrggbb`: `main` is its primary, `secondary` its
 /// secondary, `hull` its hull, `lights` the lit panels.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IconColors {
     pub primary: String,
     pub secondary: String,

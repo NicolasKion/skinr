@@ -16,8 +16,7 @@
   import ShipFilters from '#lib/components/ship-filters.svelte';
   import StageAlert from '#lib/components/stage-alert.svelte';
   import { nav } from '#lib/nav.svelte.js';
-  import { CENTER, stage } from '#lib/stage.svelte.js';
-  import { HERO_POSE } from '#lib/viewer/poses.js';
+  import { stage, useScene } from '#lib/stage.svelte.js';
   import type { ShipSummary } from '#lib/types.js';
 
   let { data } = $props();
@@ -120,27 +119,15 @@
       .map((group) => ({ group, ships: byGroup.get(group.id) ?? [] }));
   });
 
-  // The stage docks beside the explorer, opening on a featured ship.
+  // The stage docks in the preview panel beside the explorer; picking another
+  // ship slides its hull in beside the last one.
+  useScene(() => ({ place: 'peek', slideShips: true }));
+  // It opens on a featured ship.
   $effect(() => {
-    stage.mode = 'dock';
-    stage.placement = CENTER;
-    stage.pose = HERO_POSE;
-    stage.dim = 0;
-    stage.hologram = 0;
-    stage.dockName = 'dock';
-    stage.dockRadius = 32;
-    if (!stage.ship) {
-      const candidates = catalog.ships.filter((ship) => FEATURED.has(ship.name));
-      const pick = candidates[Math.floor(Math.random() * candidates.length)] ?? catalog.ships[0];
-      if (pick) stage.show(pick);
-    }
-  });
-  // Picking another ship slides its hull in beside the last one.
-  $effect(() => {
-    stage.slideShips = true;
-    return () => {
-      stage.slideShips = false;
-    };
+    if (stage.ship) return;
+    const candidates = catalog.ships.filter((ship) => FEATURED.has(ship.name));
+    const pick = candidates[Math.floor(Math.random() * candidates.length)] ?? catalog.ships[0];
+    if (pick) stage.show(pick);
   });
 
   /**

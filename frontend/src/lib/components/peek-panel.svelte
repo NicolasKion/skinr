@@ -154,7 +154,7 @@
   style:--dock-tint={tint}
   style:--peek={peek.css}
   style:--footer-in="{footerIn}px"
-  use:dockTarget
+  use:dockTarget={'peek'}
 >
   {@render backdrop?.()}
 </div>

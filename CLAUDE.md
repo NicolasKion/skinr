@@ -39,16 +39,25 @@ theme or tooling, do what it does.
   `--shadow`, ...), never raw white or black. Surfaces that stay dark in both
   themes (the blueprint paper) take `.theme-dark`.
 - One shared 3D stage (`#lib/stage.svelte.ts`, `#lib/components/stage.svelte`)
-  lives in the root layout at z-10 with a transparent canvas. Pages set its mode
-  (hero, dock, hidden) and ship; UI that must sit above it uses z-20, anything
-  behind it (the ship page's background type) sits at z-0. Never resize the canvas
-  for a mode change; the dock is the same canvas scaled and clipped.
+  lives in the root layout at z-10 with a transparent canvas. Pages declare a
+  scene with `useScene` (its place: `hero`, `peek` or `blueprint`, plus pose,
+  placement, dim) and pick the ship; they never write the stage's fields. UI
+  that must sit above it uses z-20, anything behind it (the ship page's
+  background type) sits at z-0. Never resize the canvas for a change of place;
+  a dock is the same canvas scaled and clipped.
+- Where the stage is and how it gets somewhere else is one state machine,
+  `#lib/stage-machine.ts` (hidden, appearing, shown, gliding, holding,
+  leaving, leaping), stepped every frame by the stage. Every change of place
+  on screen glides; a stage out of sight shows only once its ship has loaded.
+  Change behaviour there, with a test, not with flags in the component. Each
+  state change and navigation goes to `stage.trace` (the console in dev and
+  with the debug tools).
 - From the blueprint chapter down the stage docks into the sheet's side
-  elevation (`stage.blueprintFit` frames it at the drawing's scale) and stays
+  elevation (the scene's `fit` frames it at the drawing's scale) and stays
   there. The livery chapter shows its own view of the same ship instead (see
   the section views below), with two rails (`#lib/components/skin-rail.svelte`):
   the game's skins and the players' SKINR designs.
-- The chapter effect on the ship page alone sets `stage.mode`.
+- On the ship page the chapter alone picks the scene.
 - URLs read: a ship is `/ships/{name-slug}` (an id redirects there), one of
   its skins `/ships/{ship}/skins/{skin-slug}`, a SKINR design
   `/ships/{ship}/skinr/{name-slug}-{first 12 of its id}`, a designer
@@ -76,9 +85,11 @@ theme or tooling, do what it does.
   their re-measure while `peek.resizing`. Pages only pass their labels and
   backdrop. The wheel zooms the stage in it, and needs ctrl wherever the
   page scrolls under the canvas.
-- Page transitions (`+layout.svelte`, `layout.css`): pages slide the way the
-  site bar reads (`PAGE_ORDER`); the site bar, the stage and a panel both
-  pages have stay put. Shared elements morph by `view-transition-name`, one
+- Page transitions: `#lib/page-transitions.ts` is the one table of how the
+  page moves between two areas (sweep, slide the way the site bar reads,
+  morph, fade); `+layout.svelte` runs it as a View Transition and `layout.css`
+  has the animations. The site bar, the stage and a panel both pages have
+  stay put. Shared elements morph by `view-transition-name`, one
   element per name and page.
 - The site bar (`#lib/components/site-bar.svelte`) lives in the root layout;
   pages put their breadcrumb, section links and reset action into
@@ -97,7 +108,9 @@ theme or tooling, do what it does.
   import reads back off their icon (`src/sde/skin_icon_colors.rs`), SKINR
   designs their materials' swatch colors plus their patterns; the 64 px icon
   (`/api/skins/{material}.png`) is only the fallback.
-  `#lib/components/skin-icon.svelte` picks.
+  `#lib/components/skin-icon.svelte` picks. Skin and SKINR design share
+  cards carry the same badge, drawn by `src/og/hexagon.rs`, a port of
+  `skin-hexagon.svelte`: change the two together.
 - A resource read that fails is reported by the renderer (`onMissing`) and
   collected in `stage.missing`; a broken ship glitches (the same post pass,
   `setGlitch`) and `#lib/components/stage-alert.svelte` says why. The runtime
