@@ -9,6 +9,7 @@
 // cover ship-leap.svelte draws (+layout.svelte).
 import { tick } from 'svelte';
 import { goto } from '$app/navigation';
+import { isPlainClick } from './clicks';
 import { THUMBNAIL_INSET } from './components/ship-thumbnail.svelte';
 import { stage } from './stage.svelte';
 import type { ShipSummary } from './types';
@@ -44,13 +45,11 @@ function until(done: () => boolean, timeout: number) {
  * motion and a stage without an engine are left to the link.
  */
 export async function leapTo(ship: ShipSummary, event: MouseEvent) {
-  const plain =
-    event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
   const picture = (event.currentTarget as HTMLElement).querySelector<HTMLImageElement>(
     'img[data-thumbnail]',
   );
   if (
-    !plain ||
+    !isPlainClick(event) ||
     !picture?.complete ||
     stage.leap ||
     !stage.releasePin ||

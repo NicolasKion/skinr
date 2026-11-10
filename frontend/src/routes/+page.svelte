@@ -16,7 +16,9 @@
   import ShipFilters from '#lib/components/ship-filters.svelte';
   import StageAlert from '#lib/components/stage-alert.svelte';
   import { nav } from '#lib/nav.svelte.js';
+  import { isPlainClick } from '#lib/clicks.js';
   import { stage, useScene } from '#lib/stage.svelte.js';
+  import { viewport } from '#lib/viewport.svelte.js';
   import type { ShipSummary } from '#lib/types.js';
 
   let { data } = $props();
@@ -140,18 +142,13 @@
     return order.indexOf(ship.id) >= current ? 1 : -1;
   }
 
-  /** Where the preview panel shows (its `lg:` classes); below it, a card opens its ship. */
-  const PANEL_SHOWS = '(min-width: 64rem)';
-
   /**
    * A card's first click previews its ship in the dock; a click on the ship
    * already previewed opens it. Without the dock (a phone), it opens at once.
    * Modified clicks (new tab and so on) are left to the browser.
    */
   function onCardClick(event: MouseEvent, ship: ShipSummary) {
-    const plain =
-      event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
-    if (plain && stage.ship?.id !== ship.id && matchMedia(PANEL_SHOWS).matches) {
+    if (isPlainClick(event) && stage.ship?.id !== ship.id && viewport.wide) {
       event.preventDefault();
       stage.show(ship, ship.dna, sideOf(ship));
       return;
@@ -320,7 +317,7 @@
 
   <!-- At least a screen tall, so a short result list can still scroll the
        filter row up under the bar and keep it docked there. -->
-  <div bind:this={results} class="min-h-dvh">
+  <div bind:this={results} class="min-h-svh">
     <div class="min-w-0">
       {#each shelves as shelf (shelf.group.id)}
         <section class="reveal mb-12">

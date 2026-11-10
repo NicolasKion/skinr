@@ -14,8 +14,9 @@
   import FittingSheet from '#lib/components/fitting-sheet.svelte';
   import SystemsSheet from '#lib/components/systems-sheet.svelte';
   import { dockTarget } from '#lib/stage.svelte.js';
+  import { viewport } from '#lib/viewport.svelte.js';
   import { TRANSITION_MS } from '#lib/viewer/poses.js';
-  import type { Blueprint } from '#lib/viewer/renderer.js';
+  import type { Blueprint } from '#lib/viewer/blueprint.js';
   import type { ShipDetail } from '#lib/types.js';
 
   let {
@@ -52,7 +53,6 @@
   const metres = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
   let areaWidth = $state(0);
-  let innerHeight = $state(900);
 
   const stacked = $derived(areaWidth > 0 && areaWidth < STACK_BELOW);
   const side = $derived(drawing?.views.find((view) => view.name === 'side') ?? null);
@@ -72,7 +72,7 @@
     const room = areaWidth - GAP * 2;
     return Math.min(
       room / (length + frontWidth),
-      (innerHeight * MAX_DRAWING_HEIGHT - GAP) / height,
+      (viewport.height * MAX_DRAWING_HEIGHT - GAP) / height,
     );
   });
   /** CSS pixels per captured pixel. */
@@ -108,8 +108,6 @@
     ['SDE', build ?? '-'],
   ]);
 </script>
-
-<svelte:window bind:innerHeight />
 
 {#snippet heading(number: string, title: string, note: string)}
   <header class="mb-7">

@@ -131,7 +131,7 @@
 
 <div>
   <main
-    class="min-h-dvh px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10"
+    class="min-h-svh px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10"
     style:--peek={peek.css}
   >
     {#if hub.designer}

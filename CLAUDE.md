@@ -73,6 +73,16 @@ theme or tooling, do what it does.
   livery chapter stacks its ship above the text, and grids of text that can
   run long need `min-w-0` (or `minmax(0, 1fr)` columns) so they cannot widen
   the page.
+- Layout sized by the screen uses `svh` in CSS and `viewport`
+  (`#lib/viewport.svelte.ts`, the small viewport in pixels) in script, never
+  `dvh` or `window.innerHeight`: those change as a phone's browser bar slides
+  in and out, and the canvas, the chapters and the ship would be laid out
+  again mid-scroll. (`dvh` is right only for a fixed overlay that should fill
+  what is visible now.)
+- Where the page scrolls under the canvas (a ship's page) it must stay
+  scrollable by touch: the renderer's `setOwnsScroll(false)` lets vertical
+  swipes scroll and sideways drags orbit; only a preview fixed to the screen
+  takes every drag and the wheel.
 - The preview panel on the right (explorer, Paragon Hub, `/me`) is one
   component, `#lib/components/peek-panel.svelte`: the stage's dock, the
   page's labels over it, the resize handle and the footer clearance. Its
@@ -140,6 +150,22 @@ theme or tooling, do what it does.
 - Chapters with their own ship (the liveries) use
   `#lib/components/section-stage.svelte`; each section view has a key and its
   own canvas and camera in the renderer (`sectionCanvas`, `setSectionView`).
+- The viewer (`frontend/src/lib/viewer/`) is split by job: `backend.ts`
+  starts the engine, `camera.ts` is the orbit camera, `renderer.ts` puts
+  ships on stage (fly in, pin, the livery carousel) and runs the frame loop,
+  `sections.ts` holds the section views, `blueprint.ts` frames and crops the
+  drawings, `input.ts` the drags. The camera's behaviour is explicit state
+  (motion: spin, hold, tween; lens: normal, pinned, releasing; arrival: none,
+  waiting, landing) and has no engine imports, so `camera.test.ts` covers it:
+  change it there with a test, never with a new flag in the renderer.
+- The ship page (`routes/ships/[ship]/[...livery]/`) is one file per chapter
+  beside `+page.svelte`, which only wires them: `chapters.ts` (how each
+  chapter frames the ship), `livery.svelte.ts` (the livery the path names,
+  and picking another), `narrow.ts` (the phone placement), `related.ts`,
+  `seo.ts`. Logic that needs no DOM goes in those modules, with a test.
+- A link's own click handler acts only on `isPlainClick` (`#lib/clicks.ts`);
+  whether the screen is wide (`lg`) is `viewport.wide`, never a media query
+  or a pixel width written out in script.
 - The fitting window look is our own WebGPU pass (`frontend/src/lib/viewer/hologram.ts`)
   over the finished frame, not a runtime wireframe mode (WebGPU has none).
 - The spec sheet reads only the dogma attributes listed in `src/sheet.rs`
@@ -147,7 +173,7 @@ theme or tooling, do what it does.
 - Only one element per page may carry `view-transition-name: ship-name`
   (`stage.morphId` picks it).
 - `@carbonenginejs/runtime` is pre-alpha. Workarounds live in
-  `frontend/src/lib/viewer/renderer.ts`, `frontend/src/lib/viewer/ship.ts`
+  `frontend/src/lib/viewer/backend.ts`, `renderer.ts` and `ship.ts` there,
   and `frontend/vite.config.ts`, each commented; remove them as the runtime
   fills the gaps.
 - The blueprint draws the hull alone (`hullOnly` in `renderer.ts`): a

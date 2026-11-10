@@ -9,11 +9,9 @@
   import Stage from '#lib/components/stage.svelte';
   import { planPage, type PageStop } from '#lib/page-transitions.js';
   import { stage } from '#lib/stage.svelte.js';
+  import { viewport } from '#lib/viewport.svelte.js';
 
   let { children } = $props();
-
-  /** Where the preview panel shows (its `lg:` classes). */
-  const PANEL_SHOWS = '(min-width: 64rem)';
 
   // The stage's trace goes to the console with the debug tools, or in dev.
   $effect(() => {
@@ -38,7 +36,7 @@
       };
     const from = stop(navigation.from);
     const to = stop(navigation.to);
-    const plan = planPage(from, to, matchMedia(PANEL_SHOWS).matches);
+    const plan = planPage(from, to, viewport.wide);
     if (from?.pathname !== to?.pathname) {
       stage.trace(`navigate ${from?.pathname} → ${to?.pathname}: ${plan?.slide ?? 'in place'}`);
     }
