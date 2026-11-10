@@ -7,6 +7,7 @@
   import { ArrowRight, LoaderCircle } from '@lucide/svelte';
   import { fade } from 'svelte/transition';
   import FactionEmblem from '#lib/components/faction-emblem.svelte';
+  import { isPlainClick } from '#lib/clicks.js';
   import PeekPanel from '#lib/components/peek-panel.svelte';
   import StageAlert from '#lib/components/stage-alert.svelte';
   import { raceTint } from '#lib/eve.js';
@@ -28,8 +29,6 @@
   } = $props();
 
   const tint = $derived(raceTint(ship?.race_id));
-  const plain = (event: MouseEvent) =>
-    event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 </script>
 
 <PeekPanel {tint}>
@@ -81,7 +80,7 @@
         href={designHref(ship, design)}
         class="pointer-events-auto flex items-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-transform hover:scale-[1.03]"
         onclick={(event) => {
-          if (plain(event)) stage.morphId = null;
+          if (isPlainClick(event)) stage.morphId = null;
         }}
       >
         On the {ship.name}

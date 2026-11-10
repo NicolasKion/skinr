@@ -1,119 +1,41 @@
-// Draws one ship with the runtime's own WebGPU backend and EVE's shaders,
-// translated in the browser. The runtime is pre-alpha; every workaround for
-// a missing piece is commented where it happens.
+// Draws one ship on the shared stage: puts ships on it (flying in, pinned
+// over a thumbnail, or sliding in beside the last one), runs the frame loop
+// and takes the blueprint's pictures. The engine is set up in backend.ts,
+// the camera is camera.ts, the section views sections.ts.
 import { blue } from '@carbonenginejs/runtime/blue';
-import { CjsLibrary } from '@carbonenginejs/runtime/core';
-import { CjsWebgpuFormat } from '@carbonenginejs/runtime/resource/formats/webgpu';
-import imageDecodeModule from '@carbonenginejs/runtime/workers/image-decode.worker.bundle.js?url';
-import compressionModule from '@carbonenginejs/runtime/workers/dds-compression.worker.bundle.js?url';
-import '@carbonenginejs/runtime/trinity';
-// Ships carry sound emitters; the audio classes must exist to hydrate them (audio stays headless).
-import '@carbonenginejs/runtime/audio/trinity';
-import {
-  Tr2RenderContext_GetMainThreadRenderContext,
-  TriView,
-  TriProjection,
-  CjsBatchManager,
-} from '@carbonenginejs/runtime/trinity/core';
-import { EveSpaceScene } from '@carbonenginejs/runtime/trinity/eve';
-import { EveSpaceSceneRenderDriver } from '@carbonenginejs/runtime/trinity';
-import { CjsWebgpuDevice } from '@carbonenginejs/runtime/trinityal/webgpu';
-import { CjsWebgpuRenderContextAL, CjsWebgpuRenderTarget } from 'cjs-webgpu-internal';
 
+import { createBackend, type Backend } from './backend';
+import {
+  BLUEPRINT_VIEWS,
+  assembleBlueprint,
+  blueprintDistance,
+  hullBounds,
+  type Blueprint,
+} from './blueprint';
+import { BLUEPRINT_FOV, OrbitCamera, pinFrustum, type Rig } from './camera';
+import { approach } from './easing';
+import { onDrag } from './input';
+import { placeSun } from './lighting';
 import { placement } from './placement';
-import { buildShip } from './ship';
-import type { GameFiles } from './resources';
 import {
   FIELD_OF_VIEW,
-  FRAMING_RADII,
-  HERO_POSE,
-  REST_PITCH,
-  REST_YAW,
   THUMBNAIL_FRAMING,
-  THUMBNAIL_POSE,
-  TRANSITION_MS,
   easeInOut,
   type CameraPose,
   type ScreenRect,
 } from './poses';
-import { alignBlockTextures } from './block-align';
-import { Hologram, gpuUsage } from './hologram';
-import { STUDIO_LOOK, applyLighting, placeSun, takeLighting } from './lighting';
-import { encodePng } from './png';
+import type { GameFiles } from './resources';
+import { SectionViews, type Section, type SectionView } from './sections';
+import { buildShip } from './ship';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/** A Caldari region backdrop: sun direction, ambient and reflection maps. */
-const DEFAULT_SCENE = 'res:/dx9/scene/universe/c01_cube.red';
-
-/** How often Blue is pumped while the scene loads, before the frame loop runs. */
-const PUMP_INTERVAL_MS = 16;
-
-/**
- * The client ships dx11 effects; the runtime translates each permutation to
- * WebGPU when it is first used.
- */
-const EFFECTS = {
-  source: 'dx11',
-  target: 'webgpu',
-  translator: CjsWebgpuFormat,
-  permutations: 'onDemand',
-  shaderModel: 'high',
-};
-
-/**
- * The modules BeCallbackMan imports for its jobs. The runtime's defaults
- * point at its own source files, which the build bundles away; these are the
- * single-file bundles it ships for that, copied as they are.
- */
-const CALLBACK_MODULES = {
-  'image.decodeBitmap': imageDecodeModule,
-  'dds.compress': compressionModule,
-};
-
-/** EVE's textures are BC compressed; the rest only help when present. */
-const REQUIRED_FEATURE = 'texture-compression-bc';
-const OPTIONAL_FEATURES = [
-  // BC compressed volume textures: Triglavian hulls, suns and cloud volumes.
-  'texture-compression-bc-sliced-3d',
-  'float32-filterable',
-  'depth32float-stencil8',
-  'rg11b10ufloat-renderable',
-];
-
-/** Fully transparent, so the page behind the canvas shows around the ship. */
-const CLEAR_COLOR = [0, 0, 0, 0];
-
-/** How much one wheel step (a pixel of deltaY) changes the framing distance, exponentially. */
-const WHEEL_ZOOM = 0.002;
-/** How close and how far the wheel may take the camera, in normal framing distances. */
-const ZOOM_IN_LIMIT = 0.4;
-const ZOOM_OUT_LIMIT = 3;
-/** Radians per dragged pixel. */
-const ORBIT_SPEED = 0.008;
-/** Radians per second the camera drifts until the viewer touches it. */
-const IDLE_SPIN = 0.1;
-/** A new ship flies in from this many times its resting distance. */
-const FLY_IN_FACTOR = 2.4;
-/** How quickly the camera eases toward its resting distance, per second. */
-const DISTANCE_EASING = 2.2;
-/** How quickly the camera eases back to its resting pitch, per second. */
-const PITCH_EASING = 1.2;
-interface CameraState {
-  yaw: number;
-  pitch: number;
-  zoom: number;
-  blueprint: number;
-}
-
 /** How quickly the hologram fades in and out, per second. */
 const HOLOGRAM_EASING = 3;
-/** How quickly the camera follows a new framing factor (a dock resized or entered), per second. */
-const FRAMING_EASING = 6;
 /** How quickly the missing-resource glitch comes and goes, per second. */
 const GLITCH_EASING = 6;
-
-const MAX_PITCH = 1.5;
+/** A ship's radius until its model says, in metres. */
+const DEFAULT_RADIUS = 50;
 /** Livery carousel: the two ships never sit closer than this many combined radii. */
 const SLIDE_SPACING = 1.2;
 /**
@@ -125,180 +47,12 @@ const SLIDE_SPACING = 1.2;
 const EDGE_MARGIN = 1.4;
 /** How long the camera takes to glide onto the incoming ship, in ms. */
 const SLIDE_DURATION = 1300;
-/** Frames the resource manager must stay idle before the incoming ship counts as loaded. */
+/** Frames the resource manager must stay idle before a ship counts as loaded. */
 const QUIET_FRAMES = 8;
-/** Slide anyway after this long, in ms, rather than wait on a resource that never lands. */
+/** Go on anyway after this long, in ms, rather than wait on a resource that never lands. */
 const READY_TIMEOUT = 12000;
-/**
- * Blueprint views use a narrow field of view from far away: close enough to
- * orthographic that the three views share one scale, as a drawing should.
- */
-const BLUEPRINT_FOV = (6 * Math.PI) / 180;
-/** Room around the ship in a blueprint view, in bounding-sphere radii. */
-const BLUEPRINT_MARGIN = 1.08;
-/** Pixels of padding kept around the ship when a view is cropped. */
-const BLUEPRINT_PADDING = 6;
-/**
- * The drawn views. The side elevation is the live ship itself (see
- * setBlueprint), seen from the same yaw as the plan, so length runs left to
- * right in both.
- */
-const BLUEPRINT_VIEWS = [
-  // Also drawn statically, so the sheet keeps its ship once the live one leaves.
-  { name: 'side', yaw: Math.PI / 2, pitch: 0 },
-  { name: 'top', yaw: Math.PI / 2, pitch: Math.PI / 2 },
-  { name: 'front', yaw: 0, pitch: 0 },
-] as const;
-
-export interface BlueprintView {
-  name: (typeof BLUEPRINT_VIEWS)[number]['name'];
-  url: string;
-  /** Cropped size in canvas pixels; every view shares one scale. */
-  width: number;
-  height: number;
-  /** Where the ship's centre falls in the cropped image, in its pixels. */
-  centerX: number;
-  centerY: number;
-}
-
-export interface Blueprint {
-  views: BlueprintView[];
-  /** The drawings' scale. */
-  metersPerPixel: number;
-  /** Bounding-box size in metres, from the plan (length, beam) and front (height). */
-  length: number;
-  beam: number;
-  height: number;
-  /**
-   * How far the hull reaches from its centre, in metres, along its length and
-   * up or down: the box the live side elevation has to fit, centred on the ship.
-   */
-  halfLength: number;
-  halfHeight: number;
-}
-
-/** Canvas pixels per CSS pixel, capped to keep 4K screens affordable. */
-const MAX_PIXEL_RATIO = 2;
-
-/** The box around a captured frame's pixels more opaque than `solid`, or null when there are none. */
-function hullBounds(image: ImageData, solid: number) {
-  const { width, height, data } = image;
-  let left = width;
-  let right = -1;
-  let top = height;
-  let bottom = -1;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (data[(y * width + x) * 4 + 3] > solid) {
-        if (x < left) left = x;
-        if (x > right) right = x;
-        if (y < top) top = y;
-        if (y > bottom) bottom = y;
-      }
-    }
-  }
-  return right < 0 ? null : { left, right, top, bottom };
-}
-
-/**
- * A view frustum in tangent units (the near plane's edges divided by its
- * distance), so it holds at any near plane.
- */
-interface Frustum {
-  left: number;
-  right: number;
-  bottom: number;
-  top: number;
-}
-
-/** Crops a captured view to the hull's visible pixels; null when nothing was drawn. */
-async function crop(image: ImageData) {
-  const { width, height, data } = image;
-  const bounds = hullBounds(image, 8);
-  if (!bounds) return null;
-  let { left, top } = bounds;
-  const { right, bottom } = bounds;
-  left = Math.max(0, left - BLUEPRINT_PADDING);
-  top = Math.max(0, top - BLUEPRINT_PADDING);
-  const cropWidth = Math.min(width, right + BLUEPRINT_PADDING + 1) - left;
-  const cropHeight = Math.min(height, bottom + BLUEPRINT_PADDING + 1) - top;
-  const png = await encodePng(data, width, left, top, cropWidth, cropHeight);
-  return {
-    url: URL.createObjectURL(png),
-    width: cropWidth,
-    height: cropHeight,
-    // The camera looks at the ship's centre, which is the frame's centre.
-    centerX: width / 2 - left,
-    centerY: height / 2 - top,
-  };
-}
-
-/**
- * A page section's own view of the ship (the liveries, the SKINRs): its
- * camera pose, whether it is on screen, and where the ship sits in it. The
- * canvas spans the whole viewport; `shift` moves the ship right by that share
- * of its width (an off-centre lens, so nothing is cut off at a frame edge) and
- * `scale` sizes it.
- */
-export interface SectionView {
-  pose: CameraPose;
-  visible: boolean;
-  shift: number;
-  scale: number;
-}
-
-/** A section view's canvas and what the viewer has done to it. */
-interface Section {
-  canvas: HTMLCanvasElement;
-  context: any;
-  view: SectionView | null;
-  /** Where the viewer dragged the view to; null follows its pose. */
-  angles: { yaw: number; pitch: number } | null;
-  drag: { x: number; y: number } | null;
-}
-
-/** Ease-in-out with a soft landing, for the carousel glide. */
-const glide = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
-
-/**
- * The resource manager reads every res:/ path through the file index. A read
- * that fails (not in the index, or the CDN refused it) is reported to
- * `onMissing` before the runtime gets the error.
- */
-function createSource(files: GameFiles, onMissing: (path: string, error: Error) => void) {
-  return {
-    Read: (path: string) =>
-      files.read(path).catch((error: Error) => {
-        onMissing(path, error);
-        throw error;
-      }),
-  };
-}
-
-/**
- * The context's Clear needs a bound texture, so on the canvas path nothing is
- * cleared and the last scene's reverse-Z depth rejects this one's fragments.
- * Clear depth to 0 (reverse-Z far) and colour to transparent on the first
- * pass of every scene.
- */
-function clearCanvasEachScene(target: any) {
-  const create = target.CreateRenderPassDescriptor.bind(target);
-  let lastFrame: unknown = null;
-  target.CreateRenderPassDescriptor = (frame: unknown, options: any = {}) => {
-    // Colour too: a frame can render several views into one canvas texture.
-    if (frame !== lastFrame) {
-      options = {
-        ...options,
-        clearDepth: options.clearDepth ?? 0,
-        clearColor: options.clearColor ?? { r: 0, g: 0, b: 0, a: 0 },
-      };
-    }
-    lastFrame = frame;
-    return create(frame, options);
-  };
-}
 
 /**
  * Shows only the ship's hull until the returned function puts the rest back.
@@ -323,236 +77,106 @@ function hullOnly(ship: any) {
   };
 }
 
-/** Loads one of EVE's universe scenes, or an empty scene when it cannot. */
-async function loadScene(path: string) {
-  // Loads only advance on Blue ticks, and the frame loop that pumps them
-  // has not started yet.
-  const pump = setInterval(() => blue.os.PumpOS(), PUMP_INTERVAL_MS);
-  try {
-    const scene = await blue.resMan.LoadObject(path);
-    if (scene instanceof EveSpaceScene) return scene;
-    console.warn('Not an EveSpaceScene:', path);
-  } catch (error) {
-    console.warn(`Could not load ${path}`, error);
-  } finally {
-    clearInterval(pump);
-  }
-  return new EveSpaceScene();
+/** A livery waiting to slide in. */
+interface QueuedSlide {
+  values: any;
+  direction: 1 | -1;
+  onGlide?: () => void;
+  resolve: (shown: boolean) => void;
+}
+
+/**
+ * A slide under way. The ships move, not the camera, and along the screen's
+ * right of whichever view draws them (`placeSlide`), so each view sees the
+ * new ship come in from the side it should, however it is turned.
+ */
+interface Slide {
+  /** `loading`: the incoming ship waits out of frame; `gliding`: it comes in. */
+  phase: 'loading' | 'gliding';
+  /** The incoming ship's position: beside the target while it loads, then gliding in. */
+  incoming: number[];
+  /** Where the incoming ship lands: its visual centre on the target. */
+  landing: number[];
+  /** The outgoing ship's position, gliding out the other way. */
+  outgoing: number[];
+  spacing: number;
+  /** How much further the outgoing ship travels, so it leaves the frame. */
+  push: number;
+  direction: 1 | -1;
+  fromDistance: number;
+  toDistance: number;
+  /** When the glide started. */
+  start: number;
+  /** How far the glide has got, eased, 0 to 1. */
+  eased: number;
+  resolve: () => void;
 }
 
 export class ShipRenderer {
   /** Owned by the renderer, so it can move between pages without a new device. */
-  readonly canvas = document.createElement('canvas');
+  readonly canvas: HTMLCanvasElement;
   ship: any = null;
+  /** Called for every resource read that fails, with its res:/ path. */
+  onMissing: ((path: string, error: Error) => void) | null = null;
 
-  private yaw = REST_YAW;
-  private pitch = REST_PITCH;
-  /** Where the camera sits now, and where it is easing to. */
-  private distance = 150;
-  private restDistance = 150;
-  private pitchTarget: number | null = null;
-  /**
-   * While a new ship loads, its fly-in waits at the start: flying in while
-   * textures stream and shaders compile stutters and pops.
-   */
-  private flyHeld = false;
-  private yawTarget: number | null = null;
-  /**
-   * A ship pinned over its thumbnail: the thumbnail's camera, its lens moved
-   * so the hull lands exactly where the picture is on screen. Released, it
-   * eases into the normal framing over `release`.
-   */
-  private pin: {
-    distance: number;
-    frustum: Frustum | null;
-    release: { start: number; duration: number } | null;
-  } | null = null;
-  /** The pose the page asked for last; a new ship flies in onto it. */
-  private pose: CameraPose = HERO_POSE;
-  /** Whether the idle spin resumes once the camera reaches its yaw target. */
-  private spinAfterTarget = false;
-  /** A timed camera transition in progress: it ends exactly on `to`. */
-  private tween: { from: CameraState; to: CameraState; start: number; spinAfter: boolean } | null =
-    null;
-  /** The pose's distance factor, and where it is easing to. */
-  private zoom = 1;
-  private zoomTarget = 1;
+  private backend: Backend;
+  private camera = new OrbitCamera();
+  private rig: Rig;
+  private sections: SectionViews;
   /** 0 is the normal render, 1 the fitting window hologram. */
   private hologramAmount = 0;
   private hologramTarget = 0;
-  /**
-   * How much farther the camera sits than the ship's framing asks: in a dock
-   * narrower than the canvas, so the ship fits the dock (stage.svelte), eased.
-   */
-  private framing = 1;
-  private framingTarget = 1;
-  private hologram: Hologram | null = null;
   /** 0 is a clean picture, 1 the full missing-resource glitch. */
   private glitchAmount = 0;
   private glitchTarget = 0;
-  /** Called for every resource read that fails, with its res:/ path. */
-  onMissing: ((path: string, error: Error) => void) | null = null;
-  /**
-   * Page sections' own views, by name: further canvases showing the ship from
-   * their own pose with the normal render, drawn by rendering the scene again
-   * each frame and copying the result over on the GPU. They let the main
-   * camera stay on the blueprint while the liveries or SKINRs are on screen.
-   */
-  private sections = new Map<string, Section>();
-  /** The WebGPU device and canvas format, for configuring section canvases. */
-  private gpuDevice: any = null;
-  private canvasFormat = '';
-  /** The camera's field of view; blueprint captures narrow it for a moment. */
-  private fov = FIELD_OF_VIEW;
-  /**
-   * The blueprint framing: 0 is the normal camera, 1 the near-orthographic
-   * side elevation showing `blueprintHalfHeight` metres above and below the
-   * ship's centre. Eased, so the camera morphs between them.
-   */
-  private blueprintAmount = 0;
-  /** How far right of centre the camera's lens is shifted, as a share of the canvas width. */
-  private lensShift = 0;
-  /** The section views' own idle spin, for a pose without a yaw. */
-  private sectionYaw = 0;
-  private blueprintTarget = 0;
-  private blueprintHalfHeight = 0;
-  private target = [0, 0, 0];
-  private spinning = true;
-  private lastFrame = 0;
-  private drag: { x: number; y: number } | null = null;
   /** The resting radius of the ship on stage, for spacing the carousel. */
-  private shipRadius = 50;
-  /** Bumped by setShip: a different ship cancels every livery slide. */
-  private slideToken = 0;
+  private shipRadius = DEFAULT_RADIUS;
+  /** Bumped for every ship put on stage: a different ship cancels what waited on the last. */
+  private shipToken = 0;
   /**
    * The livery waiting to slide in next. Only one waits: a newer request
    * replaces it, so skipped liveries never play.
    */
-  private nextSlide: {
-    values: any;
-    direction: 1 | -1;
-    onGlide?: () => void;
-    resolve: (shown: boolean) => void;
-  } | null = null;
+  private nextSlide: QueuedSlide | null = null;
   /** Whether the queue is working through slides. */
   private sliding = false;
-  /**
-   * The running glide, if any. The ships move, not the camera, and along the
-   * screen's right of whichever view draws them (`placeSlide`), so each view
-   * sees the new ship come in from the side it should, however it is turned.
-   */
-  private slide: {
-    /** The incoming ship's position: beside the target while it loads, then gliding in. */
-    incoming: number[];
-    /** Where the incoming ship lands: its visual centre on the target. */
-    landing: number[];
-    /** The outgoing ship's position, gliding out the other way. */
-    outgoing: number[];
-    spacing: number;
-    /** How much further the outgoing ship travels, so it leaves the frame. */
-    push: number;
-    direction: 1 | -1;
-    fromDistance: number;
-    toDistance: number;
-    /** When the glide started; null while the incoming ship still loads. */
-    start: number | null;
-    eased: number;
-    resolve: () => void;
-  } | null = null;
+  private slide: Slide | null = null;
   private slideDone: Promise<void> = Promise.resolve();
+  /**
+   * Whether the canvas takes the wheel and every drag itself: in a preview
+   * fixed to the screen (a docked panel), where there is no page to scroll
+   * under it. Otherwise the page scrolls: the wheel zooms only with ctrl, and
+   * a finger's vertical swipe scrolls the page while sideways it orbits.
+   */
+  private ownsScroll = false;
+  private lastFrame = 0;
   private reported = new Set<string>();
 
-  private device: any;
-  private al: any;
-  private scene: any;
-  private view: any;
-  private projection: any;
-  private driver: any;
-
   static async create(files: GameFiles): Promise<ShipRenderer> {
-    if (!navigator.gpu) throw new Error('This browser has no WebGPU.');
-    const renderer = new ShipRenderer();
-    await renderer.init(files);
+    const canvas = document.createElement('canvas');
+    let renderer: ShipRenderer | null = null;
+    const backend = await createBackend(canvas, files, (path, error) =>
+      renderer?.onMissing?.(path, error),
+    );
+    renderer = new ShipRenderer(canvas, backend);
     return renderer;
   }
 
-  private async init(files: GameFiles) {
-    // The library's defaults register every format, resource type and object
-    // builder a ship needs (PNG, textures, geometry, composite textures, black).
-    const runtime = await new CjsLibrary({
-      resMan: {
-        source: createSource(files, (path, error) => this.onMissing?.(path, error)),
-        useWorkerLoading: false,
-      },
-      // Callbacks run on the main thread, pumped by PumpOS each frame.
-      callbackMan: { useWorkers: false },
-      callbackModules: CALLBACK_MODULES,
-      effects: EFFECTS,
-    }).Initialize({ sof: null, characterLibrary: null });
-
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-    if (!adapter) throw new Error('No WebGPU adapter is available.');
-    if (!adapter.features.has(REQUIRED_FEATURE)) {
-      throw new Error("This GPU lacks BC texture compression, which EVE's textures need.");
-    }
-    const requiredFeatures = [REQUIRED_FEATURE, ...OPTIONAL_FEATURES].filter((feature) =>
-      adapter.features.has(feature),
-    );
-    const webgpu = await CjsWebgpuDevice.Request({
-      adapter,
-      deviceDescriptor: { requiredFeatures },
-    });
-    alignBlockTextures(webgpu.GetDevice());
-
-    const backBuffer = new CjsWebgpuRenderTarget(webgpu, {
-      canvas: this.canvas,
-      depthFormat: 'depth32float',
-      alphaMode: 'premultiplied',
-      // The hologram pass copies the finished frame aside.
-      extraUsage: gpuUsage.GPUTextureUsage.COPY_SRC,
-    });
-    clearCanvasEachScene(backBuffer);
-    // The format is chosen when the canvas is first configured.
-    backBuffer.Configure({ width: 1, height: 1 });
-    this.hologram = new Hologram(webgpu.GetDevice(), this.canvas, backBuffer.GetFormat());
-    this.gpuDevice = webgpu.GetDevice();
-    this.canvasFormat = backBuffer.GetFormat();
-    this.al = new CjsWebgpuRenderContextAL({ webgpu, renderTarget: backBuffer });
-    // Starts Trinity on this backend: resources prepare on trinity.device,
-    // and Blue's ticks (PumpOS) drive the device's render jobs.
-    this.device = runtime.AttachTrinity({ renderContextAL: this.al });
-    if (!this.device.CreateSimpleDevice(this.canvas, 1, 1)) {
-      throw new Error('Could not create the Trinity device.');
-    }
-
-    this.scene = await loadScene(DEFAULT_SCENE);
-    applyLighting(this.scene, takeLighting(this.scene), STUDIO_LOOK);
-    this.view = new TriView();
-    this.projection = new TriProjection();
-
-    this.driver = new EveSpaceSceneRenderDriver();
-    this.driver.scene = this.scene;
-    this.driver.view = this.view;
-    this.driver.projection = this.projection;
-    this.driver.clearColor = CLEAR_COLOR;
-    // Without a batch manager the driver collects nothing. With no producers
-    // registered, every renderable falls back to its own GetBatches.
-    this.driver.SetBatchManager(new CjsBatchManager().Initialize());
-
-    // The WebGPU backend cannot hand its canvas to a Tr2RenderTarget yet, so
-    // the driver runs without a destination and draws into the bound canvas
-    // pass. That also skips post-processing, which the runtime does not drive yet.
-    const renderContext = Tr2RenderContext_GetMainThreadRenderContext();
-    this.device.SetRenderJobs({
-      RunUpdate: () => {},
-      Run: (realTime: number, simTime: number) =>
-        this.driver.Execute(null, null, realTime, simTime, null, renderContext),
-    });
-
+  private constructor(canvas: HTMLCanvasElement, backend: Backend) {
+    this.canvas = canvas;
+    this.backend = backend;
+    this.rig = {
+      view: backend.view,
+      projection: backend.projection,
+      aspect: () => canvas.width / Math.max(1, canvas.height),
+      sun: (yaw, pitch) => placeSun(backend.scene, yaw, pitch),
+    };
+    this.sections = new SectionViews(backend.gpu);
     this.bindInput();
-    new ResizeObserver(() => this.resize()).observe(this.canvas);
     requestAnimationFrame((time) => this.frame(time));
   }
+
+  // --- Putting a ship on stage ---
 
   /**
    * Swaps the shown ship for one built from SOF model values. Resolves once
@@ -561,27 +185,19 @@ export class ShipRenderer {
    */
   async setShip(values: any): Promise<boolean> {
     const token = this.replaceShip(values);
-    // Fly in from afar and a little higher, onto the pose the page asked
-    // for (not a fixed one), unless the viewer is mid-drag.
-    if (!this.drag) {
-      this.distance = this.restDistance * FLY_IN_FACTOR;
-      this.pitch = this.pose.pitch + 0.35;
-      this.pitchTarget = this.pose.pitch;
-    }
     // Drawn from afar meanwhile, so everything it needs is requested.
-    this.flyHeld = true;
-    const loaded = await this.waitForResources(token);
-    if (token !== this.slideToken) return false;
-    this.flyHeld = false;
+    this.camera.flyIn();
+    const loaded = await this.loaded(token);
+    if (token !== this.shipToken) return false;
+    this.camera.land();
     return loaded;
   }
 
   /** Puts a new ship on stage in place of everything shown; returns its request token. */
   private replaceShip(values: any) {
-    const token = ++this.slideToken;
+    const token = ++this.shipToken;
     this.nextSlide?.resolve(false);
     this.nextSlide = null;
-    this.pin = null;
     // A different ship cancels any livery glide in flight.
     if (this.slide) {
       const { resolve } = this.slide;
@@ -591,10 +207,9 @@ export class ShipRenderer {
     this.removeObject(this.ship);
     this.ship = buildShip(values);
     this.ship.translationCurve = placement([0, 0, 0]);
-    this.scene.objects.push(this.ship);
-    this.target = [...(values.boundingSphereCenter ?? [0, 0, 0])];
-    this.shipRadius = values.boundingSphereRadius ?? 50;
-    this.restDistance = Math.max(10, this.shipRadius * FRAMING_RADII);
+    this.backend.scene.objects.push(this.ship);
+    this.shipRadius = values.boundingSphereRadius ?? DEFAULT_RADIUS;
+    this.camera.frame(values.boundingSphereCenter ?? [0, 0, 0], this.shipRadius);
     return token;
   }
 
@@ -608,58 +223,25 @@ export class ShipRenderer {
   async pinShip(values: any, rect: ScreenRect): Promise<boolean> {
     const token = this.replaceShip(values);
     const { margin, padding, solid } = THUMBNAIL_FRAMING;
-    const pin: NonNullable<ShipRenderer['pin']> = {
-      distance: (this.shipRadius * margin) / Math.sin(FIELD_OF_VIEW / 2),
-      frustum: null,
-      release: null,
-    };
-    this.pin = pin;
-    // The thumbnail's angle, held, with nothing else on the camera.
-    this.tween = null;
-    this.spinning = false;
-    this.pitchTarget = null;
-    this.yawTarget = null;
-    ({ yaw: this.yaw, pitch: this.pitch } = THUMBNAIL_POSE);
-    this.zoom = this.zoomTarget = 1;
-    this.blueprintAmount = this.blueprintTarget = 0;
+    this.camera.pin((this.shipRadius * margin) / Math.sin(FIELD_OF_VIEW / 2));
     this.hologramAmount = 0;
-    this.distance = this.restDistance;
     // Drawn meanwhile (the stage keeps it out of sight), so everything it
     // needs is requested.
-    if (!(await this.waitForResources(token)) || !this.hologram) return false;
+    if (!(await this.loaded(token))) return false;
 
     // The first look, and the hull's box in it.
-    this.updateCamera();
+    this.camera.apply(this.rig);
     if (!this.pump()) return false;
-    const image = await this.hologram.readback();
-    if (token !== this.slideToken) return false;
+    const image = await this.backend.hologram.readback();
+    if (token !== this.shipToken) return false;
     const bounds = hullBounds(image, solid - 1);
     const screen = this.canvas.getBoundingClientRect();
     if (!bounds || !screen.width) {
-      this.pin = null;
+      this.camera.unpin();
       return true;
     }
-    // The hull's square, padded, in tangent units: what the thumbnail shows.
-    const tangent = Math.tan(FIELD_OF_VIEW / 2);
-    const aspect = image.width / image.height;
-    const x = (pixel: number) => ((pixel / image.width) * 2 - 1) * tangent * aspect;
-    const y = (pixel: number) => (1 - (pixel / image.height) * 2) * tangent;
-    const centerX = (x(bounds.left) + x(bounds.right + 1)) / 2;
-    const centerY = (y(bounds.top) + y(bounds.bottom + 1)) / 2;
-    const extent =
-      (Math.max(x(bounds.right + 1) - x(bounds.left), y(bounds.top) - y(bounds.bottom + 1)) / 2) *
-      padding;
-    // Stretched over the whole canvas so that square covers `rect`.
-    const perPixel = (extent * 2) / rect.width;
-    const left = centerX - extent - (rect.x - screen.x) * perPixel;
-    const top = centerY + extent + (rect.y - screen.y) * perPixel;
-    pin.frustum = {
-      left,
-      right: left + screen.width * perPixel,
-      top,
-      bottom: top - screen.height * perPixel,
-    };
-    this.updateCamera();
+    this.camera.pinTo(pinFrustum(bounds, image, rect, screen, padding));
+    this.camera.apply(this.rig);
     this.pump();
     return true;
   }
@@ -669,57 +251,44 @@ export class ShipRenderer {
    * place to the normal framing, then spins as usual.
    */
   releasePin(duration: number) {
-    if (this.pin?.frustum) this.pin.release = { start: performance.now(), duration };
-    else this.pin = null;
+    this.camera.release(duration);
   }
 
-  /** The camera for a pinned ship, blended toward the normal one while it is released. */
-  private pinnedCamera(pin: NonNullable<ShipRenderer['pin']>) {
-    const tangent = Math.tan(FIELD_OF_VIEW / 2);
-    const aspect = this.canvas.width / Math.max(1, this.canvas.height);
-    const normal: Frustum = {
-      left: -tangent * aspect,
-      right: tangent * aspect,
-      bottom: -tangent,
-      top: tangent,
-    };
-    const from = pin.frustum ?? normal;
-    const k = pin.release
-      ? easeInOut(Math.min(1, (performance.now() - pin.release.start) / pin.release.duration))
-      : 0;
-    const mix = (a: number, b: number) => a + (b - a) * k;
-    const distance = mix(pin.distance, this.restDistance);
-    const [tx, ty, tz] = this.target;
-    const c = Math.cos(this.pitch);
-    const eye = [
-      tx + distance * c * Math.sin(this.yaw),
-      ty + distance * Math.sin(this.pitch),
-      tz + distance * c * Math.cos(this.yaw),
-    ];
-    const up = [
-      -Math.sin(this.pitch) * Math.sin(this.yaw),
-      Math.cos(this.pitch),
-      -Math.sin(this.pitch) * Math.cos(this.yaw),
-    ];
-    this.view.SetLookAtPosition(eye, this.target, up);
-    placeSun(this.scene, this.yaw, this.pitch);
-    const near = Math.max(0.1, distance / 100);
-    this.projection.PerspectiveOffCenter(
-      mix(from.left, normal.left) * near,
-      mix(from.right, normal.right) * near,
-      mix(from.bottom, normal.bottom) * near,
-      mix(from.top, normal.top) * near,
-      near,
-      distance * 20,
-    );
+  private removeObject(object: any) {
+    if (!object) return;
+    const { objects } = this.backend.scene;
+    const at = objects.indexOf(object);
+    if (at !== -1) objects.splice(at, 1);
   }
 
   /**
-   * The livery carousel. The new ship is built beside the current one, out of
-   * frame on the side it comes from; once everything it needs has loaded, the
-   * camera glides over to it, the old ship leaves on the other side and is
-   * dropped. `onGlide` is called as it starts moving. Resolves once it has
-   * landed, or false when a newer request overtook this one.
+   * Waits until the resource manager has stayed idle for a few frames (or
+   * gives up waiting after READY_TIMEOUT). With a `token`, false as soon as a
+   * different ship, or a newer livery, makes the wait moot.
+   */
+  private async loaded(token?: number): Promise<boolean> {
+    const overtaken = () =>
+      token !== undefined && (token !== this.shipToken || this.nextSlide !== null);
+    const deadline = performance.now() + READY_TIMEOUT;
+    let quiet = 0;
+    while (performance.now() < deadline && quiet < QUIET_FRAMES) {
+      // Polling once per frame is the point here, not a missed parallelism.
+      // oxlint-disable-next-line no-await-in-loop
+      await nextFrame();
+      if (overtaken()) return false;
+      quiet = blue.resMan.IsLoading() ? 0 : quiet + 1;
+    }
+    return !overtaken();
+  }
+
+  // --- The livery carousel ---
+
+  /**
+   * The new ship is built beside the current one, out of frame on the side
+   * it comes from; once everything it needs has loaded, the camera glides
+   * over to it, the old ship leaves on the other side and is dropped.
+   * `onGlide` is called as it starts moving. Resolves once it has landed, or
+   * false when a newer request overtook this one.
    */
   async slideToShip(values: any, direction: 1 | -1, onGlide?: () => void): Promise<boolean> {
     // A livery that has not started gliding yet gives way to this one.
@@ -753,29 +322,28 @@ export class ShipRenderer {
   }
 
   private async slideOnce(values: any, direction: 1 | -1, onGlide?: () => void): Promise<boolean> {
-    const token = this.slideToken;
+    const token = this.shipToken;
     if (!this.ship) {
       const shown = await this.setShip(values);
       if (shown) onGlide?.();
       return shown;
     }
 
-    const radius = values.boundingSphereRadius ?? 50;
+    const radius = values.boundingSphereRadius ?? DEFAULT_RADIUS;
     const center: number[] = values.boundingSphereCenter ?? [0, 0, 0];
-    const fromDistance = this.distance;
-    const toDistance = Math.max(10, radius * FRAMING_RADII);
+    const fromDistance = this.camera.distance;
+    const toDistance = OrbitCamera.restFor(radius);
 
     // The camera whose framing spaces the ships: a section view while one
     // shows, else the main one. (Which way they glide is up to each view.)
-    const watching =
-      [...this.sections.values()].find((candidate) => candidate.view?.visible)?.view ?? null;
-    const zoom = watching ? (watching.pose.zoom ?? 1) / watching.scale : this.framing;
+    const watching = this.sections.visible[0]?.view ?? null;
+    const zoom = watching ? (watching.pose.zoom ?? 1) / watching.scale : this.camera.framing;
     const shift = watching?.shift ?? 0;
 
     // Spaced by what the camera can see, not by ship size alone: a big hull
     // is framed from further back, where the view is wider. With the ship
     // off centre, the side it sits nearer to has less room than the other.
-    const aspect = this.canvas.width / Math.max(1, this.canvas.height);
+    const aspect = this.rig.aspect();
     const reach = (distance: number, side: 1 | -1) =>
       distance * zoom * Math.tan(FIELD_OF_VIEW / 2) * aspect * (1 - 2 * shift * side);
     const spacing = Math.max(
@@ -794,12 +362,13 @@ export class ShipRenderer {
     // target: its bounding-sphere centre sits off its origin (usually along
     // its length), and otherwise the spin would push one side's ship further
     // into view. It waits beside the target, out of frame, while it loads.
-    const landing = this.target.map((value, axis) => value - center[axis]);
+    const landing = this.camera.target.map((value, axis) => value - center[axis]);
     const incoming = buildShip(values);
     incoming.translationCurve = placement([...landing]);
-    this.scene.objects.push(incoming);
+    this.backend.scene.objects.push(incoming);
     this.slideDone = new Promise<void>((resolve) => {
       this.slide = {
+        phase: 'loading',
         incoming: incoming.translationCurve.position,
         landing,
         outgoing: this.ship.translationCurve?.position ?? [0, 0, 0],
@@ -808,24 +377,28 @@ export class ShipRenderer {
         direction,
         fromDistance,
         toDistance,
-        start: null,
+        start: 0,
         eased: 0,
         resolve,
       };
     });
 
-    if (!(await this.waitForResources(token))) {
-      if (token === this.slideToken) this.slide = null;
+    if (!(await this.loaded(token))) {
+      if (token === this.shipToken) this.slide = null;
       this.removeObject(incoming);
       return false;
     }
 
     // Glide: the incoming ship moves onto the target and the frame re-fits
     // it, while the outgoing ship drifts out the other way.
-    if (this.slide) this.slide.start = performance.now();
+    const slide: Slide | null = this.slide;
+    if (slide) {
+      slide.phase = 'gliding';
+      slide.start = performance.now();
+    }
     onGlide?.();
     await this.slideDone;
-    if (token !== this.slideToken) {
+    if (token !== this.shipToken) {
       // Cut short by a new ship; that ship replaced everything already.
       this.removeObject(incoming);
       return false;
@@ -837,7 +410,7 @@ export class ShipRenderer {
     this.ship = incoming;
     this.shipRadius = radius;
     incoming.translationCurve = placement([0, 0, 0]);
-    this.target = [...center];
+    this.camera.target = [...center];
     return true;
   }
 
@@ -857,6 +430,26 @@ export class ShipRenderer {
     }
   }
 
+  /** One frame of a glide: the ships' progress, and the camera's distance with it. */
+  private advanceSlide(now: number) {
+    const slide = this.slide;
+    if (slide?.phase !== 'gliding') return;
+    const progress = Math.min(1, (now - slide.start) / SLIDE_DURATION);
+    slide.eased = easeInOut(progress);
+    // The zoom follows the glide exactly, so the frame is final when it ends.
+    const { fromDistance, toDistance } = slide;
+    this.camera.rest(fromDistance + (toDistance - fromDistance) * slide.eased);
+    if (progress < 1) return;
+    // Land exactly; the swap that follows keeps this picture.
+    this.placeSlide(this.camera.yaw);
+    // The outgoing ship goes now, before this frame draws: with the slide
+    // over, the section views no longer place it for their own angle, and
+    // where it was left for this one can be inside theirs.
+    this.removeObject(this.ship);
+    this.slide = null;
+    slide.resolve();
+  }
+
   /**
    * While the incoming ship loads, draws it once in view, on its landing
    * spot, in a pass the frame's real renders then paint over. The runtime
@@ -869,113 +462,26 @@ export class ShipRenderer {
    */
   private warmIncoming() {
     const slide = this.slide;
-    if (!slide || slide.start !== null) return;
+    if (slide?.phase !== 'loading') return;
     for (let axis = 0; axis < 3; axis++) slide.incoming[axis] = slide.landing[axis];
-    this.updateCamera();
+    this.camera.apply(this.rig);
     blue.os.PumpOS();
-    this.placeSlide(this.yaw);
+    this.placeSlide(this.camera.yaw);
   }
 
-  private removeObject(object: any) {
-    if (!object) return;
-    const at = this.scene.objects.indexOf(object);
-    if (at !== -1) this.scene.objects.splice(at, 1);
-  }
-
-  /** Waits until the resource manager has stayed idle for a few frames. */
-  private async waitForResources(token: number): Promise<boolean> {
-    const deadline = performance.now() + READY_TIMEOUT;
-    let quiet = 0;
-    while (performance.now() < deadline) {
-      // Polling once per frame is the point here, not a missed parallelism.
-      // oxlint-disable-next-line no-await-in-loop
-      await nextFrame();
-      // A different ship, or a newer livery while this one still loads.
-      if (token !== this.slideToken || this.nextSlide) return false;
-      quiet = blue.resMan.IsLoading() ? 0 : quiet + 1;
-      if (quiet >= QUIET_FRAMES) return true;
-    }
-    return token === this.slideToken && !this.nextSlide;
-  }
+  // --- What the page asks of the camera and the picture ---
 
   /** Back to the starting angle and idle spin. */
   resetView() {
-    this.setPose(HERO_POSE);
-    this.distance = Math.max(this.distance, this.restDistance);
+    this.camera.reset();
   }
 
   /**
-   * Draws the ship's blueprint: side, top and front views in the hologram
-   * style, from a near-orthographic camera, each cropped to the hull. Renders
-   * them all within one task and then the live view again, so nothing flashes.
+   * Moves the camera onto a pose over TRANSITION_MS, then holds it exactly
+   * (a pose without a yaw resumes the idle spin). It holds until the viewer drags.
    */
-  async captureBlueprint(): Promise<Blueprint | null> {
-    if (!this.ship || !this.hologram) return null;
-    await this.whenIdle();
-    if (!this.ship) return null;
-    const hologram = this.hologram;
-
-    const saved = {
-      yaw: this.yaw,
-      pitch: this.pitch,
-      distance: this.distance,
-      zoom: this.zoom,
-      blueprintAmount: this.blueprintAmount,
-      framing: this.framing,
-    };
-    // Framed by the canvas's height; a portrait canvas (a phone) is narrower
-    // than tall, so the camera backs off until the hull fits its width too,
-    // or the drawing would measure a hull cut off at the sides.
-    const aspect = this.canvas.width / Math.max(1, this.canvas.height);
-    const distance =
-      (this.shipRadius / Math.tan(BLUEPRINT_FOV / 2)) * BLUEPRINT_MARGIN * Math.max(1, 1 / aspect);
-    const reads: Promise<ImageData>[] = [];
-    const showAll = hullOnly(this.ship);
-    try {
-      this.fov = BLUEPRINT_FOV;
-      this.distance = distance;
-      this.zoom = 1;
-      // Its scale comes from `distance` alone, so no page framing may add to it.
-      this.framing = 1;
-      this.blueprintAmount = 0;
-      for (const view of BLUEPRINT_VIEWS) {
-        this.yaw = view.yaw;
-        this.pitch = view.pitch;
-        this.updateCamera();
-        this.pump();
-        hologram.apply(1, 0);
-        reads.push(hologram.readback());
-      }
-    } finally {
-      showAll();
-      this.fov = FIELD_OF_VIEW;
-      Object.assign(this, saved);
-      this.updateCamera();
-      this.pump();
-      if (this.hologramAmount > 0) hologram.apply(this.hologramAmount, 0);
-    }
-
-    const images = await Promise.all(reads);
-    const views: BlueprintView[] = [];
-    const cropped = await Promise.all(images.map((image) => crop(image)));
-    BLUEPRINT_VIEWS.forEach((view, index) => {
-      const found = cropped[index];
-      if (found) views.push({ name: view.name, ...found });
-    });
-    const metersPerPixel = (2 * distance * Math.tan(BLUEPRINT_FOV / 2)) / this.canvas.height;
-    const top = views.find((view) => view.name === 'top');
-    const front = views.find((view) => view.name === 'front');
-    return {
-      views,
-      metersPerPixel,
-      length: (top?.width ?? 0) * metersPerPixel,
-      beam: (top?.height ?? 0) * metersPerPixel,
-      height: (front?.height ?? 0) * metersPerPixel,
-      halfLength: top ? Math.max(top.centerX, top.width - top.centerX) * metersPerPixel : 0,
-      halfHeight: front
-        ? Math.max(front.centerY, front.height - front.centerY) * metersPerPixel
-        : 0,
-    };
+  setPose(pose: CameraPose) {
+    this.camera.setPose(pose);
   }
 
   /**
@@ -984,110 +490,7 @@ export class ShipRenderer {
    * back to the normal camera with null.
    */
   setBlueprint(halfHeight: number | null) {
-    const target = halfHeight === null ? 0 : 1;
-    if (halfHeight !== null) this.blueprintHalfHeight = halfHeight;
-    this.blueprintTarget = target;
-    if (this.tween) {
-      this.tween.to.blueprint = target;
-    } else if (this.blueprintAmount !== target) {
-      this.startTween({ ...this.cameraState(), blueprint: target }, this.spinning);
-    }
-  }
-
-  /** Resolves once the resource manager has stayed idle for a few frames. */
-  private async whenIdle() {
-    const deadline = performance.now() + READY_TIMEOUT;
-    let quiet = 0;
-    while (performance.now() < deadline && quiet < QUIET_FRAMES) {
-      // Polling once per frame is the point here.
-      // oxlint-disable-next-line no-await-in-loop
-      await nextFrame();
-      quiet = blue.resMan.IsLoading() ? 0 : quiet + 1;
-    }
-  }
-
-  /**
-   * The canvas of the section view `key`, created on first use. The page puts
-   * it in its section; the renderer draws into it while the view is visible.
-   */
-  sectionCanvas(key: string): HTMLCanvasElement {
-    return this.section(key).canvas;
-  }
-
-  /** Shows the section view `key` from its pose while `visible`, or stops it with null. */
-  setSectionView(key: string, view: SectionView | null) {
-    this.section(key).view = view;
-  }
-
-  private section(key: string): Section {
-    let section = this.sections.get(key);
-    if (!section) {
-      const canvas = document.createElement('canvas');
-      const context: any = canvas.getContext('webgpu');
-      context?.configure({
-        device: this.gpuDevice,
-        format: this.canvasFormat,
-        alphaMode: 'premultiplied',
-        usage: gpuUsage.GPUTextureUsage.COPY_DST | gpuUsage.GPUTextureUsage.RENDER_ATTACHMENT,
-      });
-      section = { canvas, context, view: null, angles: null, drag: null };
-      this.sections.set(key, section);
-      this.bindSectionInput(section);
-    }
-    return section;
-  }
-
-  /** A section view's camera angles: dragged, or its pose (spinning without a yaw). */
-  private sectionCamera(section: Section, pose: CameraPose) {
-    return section.angles ?? { yaw: pose.yaw ?? this.sectionYaw, pitch: pose.pitch };
-  }
-
-  /** Renders a section view into the main canvas and copies it to the section's canvas. */
-  private renderSectionView(section: Section, view: SectionView, time: number) {
-    const { pose } = view;
-    if (!this.hologram || !section.context) return;
-    const { width, height } = this.canvas;
-    if (section.canvas.width !== width || section.canvas.height !== height) {
-      section.canvas.width = width;
-      section.canvas.height = height;
-    }
-    const saved = {
-      yaw: this.yaw,
-      pitch: this.pitch,
-      zoom: this.zoom,
-      blueprintAmount: this.blueprintAmount,
-      lensShift: this.lensShift,
-    };
-    try {
-      ({ yaw: this.yaw, pitch: this.pitch } = this.sectionCamera(section, pose));
-      // A smaller ship is the same ship seen from further back.
-      this.zoom = (pose.zoom ?? 1) / view.scale;
-      this.lensShift = view.shift;
-      this.blueprintAmount = 0;
-      this.placeSlide(this.yaw);
-      this.updateCamera();
-      blue.os.PumpOS();
-      if (this.glitchAmount > 0) this.hologram.apply(0, time / 1000, this.glitchAmount);
-      this.hologram.copyTo(section.context, { x: 0, y: 0, width, height });
-    } finally {
-      Object.assign(this, saved);
-    }
-  }
-
-  /** Jumps every eased camera value to where it is heading. */
-  settle() {
-    this.finishTween();
-    this.blueprintAmount = this.blueprintTarget;
-    this.hologramAmount = this.hologramTarget;
-    if (this.yawTarget !== null) this.yaw = this.yawTarget;
-    if (this.pitchTarget !== null) this.pitch = this.pitchTarget;
-    this.zoom = this.zoomTarget;
-    this.distance = this.restDistance;
-  }
-
-  /** Glitches the picture (1) for a ship with missing resources, or clears it (0). */
-  setGlitch(amount: number) {
-    this.glitchTarget = Math.min(1, Math.max(0, amount));
+    this.camera.setBlueprint(halfHeight);
   }
 
   /**
@@ -1095,8 +498,7 @@ export class ShipRenderer {
    * framed), easing there, or at once with `instant` (a canvas nobody sees).
    */
   setFraming(factor: number, instant = false) {
-    this.framingTarget = Math.max(1, factor);
-    if (instant) this.framing = this.framingTarget;
+    this.camera.setFraming(factor, instant);
   }
 
   /** Fades toward the fitting window hologram (1) or the normal render (0). */
@@ -1104,130 +506,120 @@ export class ShipRenderer {
     this.hologramTarget = Math.min(1, Math.max(0, amount));
   }
 
-  private cameraState(): CameraState {
-    return { yaw: this.yaw, pitch: this.pitch, zoom: this.zoom, blueprint: this.blueprintAmount };
+  /** Glitches the picture (1) for a ship with missing resources, or clears it (0). */
+  setGlitch(amount: number) {
+    this.glitchTarget = Math.min(1, Math.max(0, amount));
+  }
+
+  /** Whether the canvas takes the wheel and every drag itself (see `ownsScroll`). */
+  setOwnsScroll(on: boolean) {
+    this.ownsScroll = on;
+    this.canvas.style.touchAction = on ? 'none' : 'pan-y';
   }
 
   /**
-   * Moves the camera onto a pose over TRANSITION_MS, then holds it exactly
-   * (a pose without a yaw resumes the idle spin). It holds until the viewer drags.
+   * The canvas of the section view `key`, created on first use. The page puts
+   * it in its section; the renderer draws into it while the view is visible.
    */
-  setPose(pose: CameraPose) {
-    this.pose = pose;
-    this.pitchTarget = null;
-    this.yawTarget = null;
-    let yaw = this.yaw;
-    if (pose.yaw !== undefined) {
-      // The shortest way round to the target angle.
-      const turn = Math.PI * 2;
-      yaw = this.yaw + ((((pose.yaw - this.yaw) % turn) + turn * 1.5) % turn) - turn / 2;
+  sectionCanvas(key: string): HTMLCanvasElement {
+    return this.sections.canvas(key);
+  }
+
+  /** Shows the section view `key` from its pose while `visible`, or stops it with null. */
+  setSectionView(key: string, view: SectionView | null) {
+    this.sections.setView(key, view);
+  }
+
+  /**
+   * Draws the ship's blueprint: side, top and front views in the hologram
+   * style, from a near-orthographic camera, each cropped to the hull. Renders
+   * them all within one task and then the live view again, so nothing flashes.
+   */
+  async captureBlueprint(): Promise<Blueprint | null> {
+    if (!this.ship) return null;
+    await this.loaded();
+    if (!this.ship) return null;
+    const { hologram } = this.backend;
+    const distance = blueprintDistance(this.shipRadius, this.rig.aspect());
+    const reads: Promise<ImageData>[] = [];
+    const showAll = hullOnly(this.ship);
+    try {
+      // Its scale comes from `distance` alone, so no page framing may add to it.
+      this.camera.look({ fov: BLUEPRINT_FOV, distance, zoom: 1, framing: 1, blueprint: 0 }, () => {
+        for (const view of BLUEPRINT_VIEWS) {
+          this.camera.yaw = view.yaw;
+          this.camera.pitch = view.pitch;
+          this.camera.apply(this.rig);
+          this.pump();
+          hologram.apply(1, 0);
+          reads.push(hologram.readback());
+        }
+      });
+    } finally {
+      showAll();
+      this.camera.apply(this.rig);
+      this.pump();
+      if (this.hologramAmount > 0) hologram.apply(this.hologramAmount, 0);
     }
-    this.startTween(
-      { yaw, pitch: pose.pitch, zoom: pose.zoom ?? 1, blueprint: this.blueprintTarget },
-      pose.yaw === undefined,
-    );
+    return assembleBlueprint(await Promise.all(reads), distance, this.canvas.height);
   }
 
-  private startTween(to: CameraState, spinAfter: boolean) {
-    this.tween = { from: this.cameraState(), to, start: performance.now(), spinAfter };
-    this.zoomTarget = to.zoom;
-    this.spinning = false;
-  }
-
-  /** Lands any camera transition at its end at once. */
-  private finishTween() {
-    const tween = this.tween;
-    if (!tween) return;
-    this.tween = null;
-    ({
-      yaw: this.yaw,
-      pitch: this.pitch,
-      zoom: this.zoom,
-      blueprint: this.blueprintAmount,
-    } = tween.to);
-    this.spinning = tween.spinAfter;
-  }
+  // --- The frame loop ---
 
   private frame(time: number) {
     requestAnimationFrame((next) => this.frame(next));
     const seconds = this.lastFrame ? (time - this.lastFrame) / 1000 : 0;
     this.lastFrame = time;
     // Nothing to draw while neither canvas is on a page.
-    const connected = [...this.sections.values()].some((section) => section.canvas.isConnected);
-    if (!this.canvas.isConnected && !connected) return;
-    const release = this.pin?.release;
-    if (release && time >= release.start + release.duration) {
-      // Landed on the normal framing: from here on it is the usual camera.
-      this.pin = null;
-      this.distance = this.restDistance;
-      this.spinning = this.pose.yaw === undefined;
-    }
-    if (this.spinning) this.yaw += seconds * IDLE_SPIN;
-    this.sectionYaw += seconds * IDLE_SPIN;
-    if (this.slide?.start != null) {
-      const progress = Math.min(1, (time - this.slide.start) / SLIDE_DURATION);
-      const eased = glide(progress);
-      const { fromDistance, toDistance } = this.slide;
-      this.slide.eased = eased;
-      // The zoom follows the glide exactly, so the frame is final when it ends.
-      this.distance = this.restDistance = fromDistance + (toDistance - fromDistance) * eased;
-      if (progress >= 1) {
-        // Land exactly; the swap that follows keeps this picture.
-        this.placeSlide(this.yaw);
-        // The outgoing ship goes now, before this frame draws: with the slide
-        // over, the section views no longer place it for their own angle, and
-        // where it was left for this one can be inside theirs.
-        this.removeObject(this.ship);
-        const { resolve } = this.slide;
-        this.slide = null;
-        resolve();
-      }
-    }
-    if (!this.flyHeld) {
-      this.distance +=
-        (this.restDistance - this.distance) * (1 - Math.exp(-seconds * DISTANCE_EASING));
-    }
-    if (this.tween) {
-      const t = Math.min(1, (performance.now() - this.tween.start) / TRANSITION_MS);
-      const k = easeInOut(t);
-      const { from, to } = this.tween;
-      this.yaw = from.yaw + (to.yaw - from.yaw) * k;
-      this.pitch = from.pitch + (to.pitch - from.pitch) * k;
-      this.zoom = from.zoom + (to.zoom - from.zoom) * k;
-      this.blueprintAmount = from.blueprint + (to.blueprint - from.blueprint) * k;
-      if (t >= 1) this.finishTween();
-    }
-    // The fly-in of a new ship eases its pitch on its own.
-    if (this.pitchTarget !== null && !this.tween && !this.flyHeld) {
-      this.pitch += (this.pitchTarget - this.pitch) * (1 - Math.exp(-seconds * PITCH_EASING));
-      if (Math.abs(this.pitchTarget - this.pitch) < 1e-3) this.pitchTarget = null;
-    }
-    this.hologramAmount +=
-      (this.hologramTarget - this.hologramAmount) * (1 - Math.exp(-seconds * HOLOGRAM_EASING));
-    if (Math.abs(this.hologramTarget - this.hologramAmount) < 1e-3) {
-      this.hologramAmount = this.hologramTarget;
-    }
-    this.framing += (this.framingTarget - this.framing) * (1 - Math.exp(-seconds * FRAMING_EASING));
-    if (Math.abs(this.framingTarget - this.framing) < 1e-3) this.framing = this.framingTarget;
-    this.glitchAmount +=
-      (this.glitchTarget - this.glitchAmount) * (1 - Math.exp(-seconds * GLITCH_EASING));
-    if (Math.abs(this.glitchTarget - this.glitchAmount) < 1e-3) {
-      this.glitchAmount = this.glitchTarget;
-    }
+    if (!this.canvas.isConnected && !this.sections.connected) return;
+    const now = performance.now();
+    this.camera.update(seconds, now);
+    this.sections.update(seconds);
+    this.advanceSlide(now);
+    this.hologramAmount = approach(
+      this.hologramAmount,
+      this.hologramTarget,
+      HOLOGRAM_EASING,
+      seconds,
+    );
+    this.glitchAmount = approach(this.glitchAmount, this.glitchTarget, GLITCH_EASING, seconds);
     try {
       this.warmIncoming();
-      for (const section of this.sections.values()) {
-        if (section.view?.visible && this.ship) this.renderSectionView(section, section.view, time);
+      if (this.ship) {
+        for (const { section, view } of this.sections.visible) {
+          this.renderSection(section, view, time);
+        }
       }
-      this.placeSlide(this.yaw);
-      this.updateCamera();
+      this.placeSlide(this.camera.yaw);
+      this.camera.apply(this.rig);
       blue.os.PumpOS();
       if (this.hologramAmount > 0 || this.glitchAmount > 0) {
-        this.hologram?.apply(this.hologramAmount, time / 1000, this.glitchAmount);
+        this.backend.hologram.apply(this.hologramAmount, time / 1000, this.glitchAmount);
       }
     } catch (error) {
       this.recoverFrame(error);
     }
+  }
+
+  /** Renders a section view into the main canvas and copies it to the section's canvas. */
+  private renderSection(section: Section, view: SectionView, time: number) {
+    if (!section.context) return;
+    const { hologram } = this.backend;
+    const { width, height } = this.canvas;
+    if (section.canvas.width !== width || section.canvas.height !== height) {
+      section.canvas.width = width;
+      section.canvas.height = height;
+    }
+    const angles = this.sections.angles(section, view.pose);
+    // A smaller ship is the same ship seen from further back.
+    const zoom = (view.pose.zoom ?? 1) / view.scale;
+    this.camera.look({ ...angles, zoom, lensShift: view.shift, blueprint: 0 }, () => {
+      this.placeSlide(angles.yaw);
+      this.camera.apply(this.rig);
+      blue.os.PumpOS();
+      if (this.glitchAmount > 0) hologram.apply(0, time / 1000, this.glitchAmount);
+      hologram.copyTo(section.context, { x: 0, y: 0, width, height });
+    });
   }
 
   /** Renders one frame through the runtime; a frame that fails is recovered from. */
@@ -1247,10 +639,11 @@ export class ShipRenderer {
    * failed frame must not stop rendering; each distinct failure is reported once.
    */
   private recoverFrame(error: unknown) {
+    const { al } = this.backend;
     // oxlint-disable-next-line no-underscore-dangle -- the queue exposes no getter for it
-    if (this.al.GetWorkQueue?.()?._inFrame) {
+    if (al.GetWorkQueue?.()?._inFrame) {
       try {
-        this.al.EndScene();
+        al.EndScene();
       } catch {
         // Nothing more to salvage from this frame.
       }
@@ -1262,139 +655,30 @@ export class ShipRenderer {
     }
   }
 
-  /**
-   * Whether the wheel zooms without ctrl: in a preview fixed to the screen
-   * (a docked panel), where the wheel has no page to scroll there.
-   */
-  private wheelZooms = false;
-  setWheelZoom(on: boolean) {
-    this.wheelZooms = on;
-  }
-
   private bindInput() {
-    const canvas = this.canvas;
-    canvas.style.touchAction = 'none';
-    canvas.addEventListener('pointerdown', (event) => {
-      this.drag = { x: event.clientX, y: event.clientY };
-      this.spinning = false;
-      this.pitchTarget = null;
-      this.yawTarget = null;
-      this.tween = null;
-      canvas.setPointerCapture(event.pointerId);
-    });
-    canvas.addEventListener('pointerup', () => (this.drag = null));
-    canvas.addEventListener('pointercancel', () => (this.drag = null));
-    canvas.addEventListener('pointermove', (event) => {
-      if (!this.drag) return;
-      this.yaw -= (event.clientX - this.drag.x) * ORBIT_SPEED;
-      this.pitch = Math.min(
-        MAX_PITCH,
-        Math.max(-MAX_PITCH, this.pitch + (event.clientY - this.drag.y) * ORBIT_SPEED),
-      );
-      this.drag = { x: event.clientX, y: event.clientY };
+    const { canvas, camera } = this;
+    this.setOwnsScroll(this.ownsScroll);
+    onDrag(canvas, {
+      start: () => {
+        camera.dragging = true;
+      },
+      // The camera is the viewer's only once they drag: a finger that lands
+      // on the ship to scroll the page must not stop its spin.
+      move: (dx, dy) => camera.orbit(dx, dy),
+      end: () => {
+        camera.dragging = false;
+      },
     });
     canvas.addEventListener(
       'wheel',
       (event) => {
         // Where the page scrolls under the canvas, only zoom on purpose
         // (ctrl/pinch or while dragging); in a fixed preview, always.
-        if (!event.ctrlKey && !this.drag && !this.wheelZooms) return;
+        if (!event.ctrlKey && !camera.dragging && !this.ownsScroll) return;
         event.preventDefault();
-        const framing = Math.max(10, this.shipRadius * FRAMING_RADII);
-        this.restDistance = Math.min(
-          framing * ZOOM_OUT_LIMIT,
-          Math.max(
-            framing * ZOOM_IN_LIMIT,
-            this.restDistance * Math.exp(event.deltaY * WHEEL_ZOOM),
-          ),
-        );
+        camera.wheel(event.deltaY, this.shipRadius);
       },
       { passive: false },
     );
-  }
-
-  /**
-   * Dragging a section view orbits its own camera; the main camera, docked in
-   * the blueprint, stays put. Vertical swipes still scroll the page.
-   */
-  private bindSectionInput(section: Section) {
-    const { canvas } = section;
-    canvas.style.touchAction = 'pan-y';
-    canvas.addEventListener('pointerdown', (event) => {
-      if (!section.view) return;
-      section.angles = this.sectionCamera(section, section.view.pose);
-      section.drag = { x: event.clientX, y: event.clientY };
-      canvas.setPointerCapture(event.pointerId);
-    });
-    canvas.addEventListener('pointerup', () => (section.drag = null));
-    canvas.addEventListener('pointercancel', () => (section.drag = null));
-    canvas.addEventListener('pointermove', (event) => {
-      const { angles, drag } = section;
-      if (!drag || !angles) return;
-      angles.yaw -= (event.clientX - drag.x) * ORBIT_SPEED;
-      angles.pitch = Math.min(
-        MAX_PITCH,
-        Math.max(-MAX_PITCH, angles.pitch + (event.clientY - drag.y) * ORBIT_SPEED),
-      );
-      section.drag = { x: event.clientX, y: event.clientY };
-    });
-  }
-
-  /**
-   * Re-creating the device on resize trips a double free in the runtime's GPU
-   * resource pool, so only the presentation surface and viewport change.
-   */
-  private resize() {
-    const ratio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
-    const width = Math.max(1, Math.round(this.canvas.clientWidth * ratio));
-    const height = Math.max(1, Math.round(this.canvas.clientHeight * ratio));
-    if (width === this.device.width && height === this.device.height) return;
-    const present = this.device.GetPresentParameters();
-    this.device.SetPresentParameters(0, { ...present, mode: { ...present.mode, width, height } });
-    this.device.width = width;
-    this.device.height = height;
-    this.device.InitD3DDevice();
-  }
-
-  private updateCamera() {
-    if (this.pin) {
-      this.pinnedCamera(this.pin);
-      return;
-    }
-    const [tx, ty, tz] = this.target;
-    // Blend the framing by visible half-height rather than by distance, so the
-    // ship keeps its size on screen while the field of view narrows.
-    const blend = this.blueprintAmount;
-    const fov = this.fov + (BLUEPRINT_FOV - this.fov) * blend;
-    const normalHalfHeight = this.distance * this.zoom * this.framing * Math.tan(this.fov / 2);
-    const halfHeight = normalHalfHeight + (this.blueprintHalfHeight - normalHalfHeight) * blend;
-    const distance = halfHeight / Math.tan(fov / 2);
-    const c = Math.cos(this.pitch);
-    const eye = [
-      tx + distance * c * Math.sin(this.yaw),
-      ty + distance * Math.sin(this.pitch),
-      tz + distance * c * Math.cos(this.yaw),
-    ];
-    // The orbit's own up direction, so straight down is a valid view too.
-    const up = [
-      -Math.sin(this.pitch) * Math.sin(this.yaw),
-      Math.cos(this.pitch),
-      -Math.sin(this.pitch) * Math.cos(this.yaw),
-    ];
-    this.view.SetLookAtPosition(eye, this.target, up);
-    placeSun(this.scene, this.yaw, this.pitch);
-    const aspect = this.canvas.width / Math.max(1, this.canvas.height);
-    const near = Math.max(0.1, distance / 100);
-    const far = distance * 20;
-    if (this.lensShift) {
-      // The same frustum, slid sideways: what the camera looks at lands
-      // `lensShift` of the width right of centre.
-      const top = near * Math.tan(fov / 2);
-      const half = top * aspect;
-      const center = -2 * this.lensShift * half;
-      this.projection.PerspectiveOffCenter(center - half, center + half, -top, top, near, far);
-    } else {
-      this.projection.PerspectiveFov(fov, aspect, near, far);
-    }
   }
 }

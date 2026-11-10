@@ -9,6 +9,7 @@
   import SectionView from '#lib/components/section-view.svelte';
   import type { StagePlacement } from '#lib/stage.svelte.js';
   import { SPHERE_SPAN, type CameraPose } from '#lib/viewer/poses.js';
+  import { viewport } from '#lib/viewport.svelte.js';
 
   let {
     key,
@@ -31,7 +32,6 @@
 
   /** How much of the band's width the ship's sphere may fill. */
   const BAND_FILL = 0.85;
-  let viewport = $state({ width: 1, height: 1 });
   /**
    * The view renders at the screen's size and is cropped to the band; framed
    * by the screen's height, a portrait phone would crop a long hull at the
@@ -43,10 +43,8 @@
   );
 </script>
 
-<svelte:window bind:innerWidth={viewport.width} bind:innerHeight={viewport.height} />
-
 <div
-  class="section-stage pointer-events-none relative h-[55dvh] shrink-0 lg:absolute lg:inset-y-0 lg:h-auto"
+  class="section-stage pointer-events-none relative h-[55svh] shrink-0 lg:absolute lg:inset-y-0 lg:h-auto"
   aria-hidden="true"
 >
   <div
@@ -97,7 +95,7 @@
     width: 100vw;
   }
   /* Behind the text, centred on the chapter, a screen tall. */
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) {
     .section-stage {
       left: 50%;
       margin-inline: 0;
@@ -107,7 +105,7 @@
       inset: auto;
       top: 50%;
       left: 0;
-      height: 100dvh;
+      height: 100svh;
       transform: translateY(-50%);
     }
   }

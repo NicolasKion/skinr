@@ -3,7 +3,8 @@
 // so every viewport shares them.
 import { openGameFiles, openSof } from './resources';
 import type { ScreenRect } from './poses';
-import type { Blueprint, ShipRenderer } from './renderer';
+import type { Blueprint } from './blueprint';
+import type { ShipRenderer } from './renderer';
 
 export type { Blueprint };
 

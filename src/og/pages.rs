@@ -703,6 +703,24 @@ mod tests {
     }
 
     #[test]
+    fn race_tints_are_the_sites() {
+        // The site keeps its own copy; neither may drift from the other.
+        let site = include_str!("../../frontend/src/lib/eve.ts");
+        for (race, hex) in RACE_TINTS {
+            assert!(
+                site.contains(&format!("  {race}: '{hex}',")),
+                "race {race} is not {hex} in frontend/src/lib/eve.ts"
+            );
+        }
+        let on_site = site
+            .lines()
+            .filter(|line| line.contains(": '#") && line.trim_start().starts_with(char::is_numeric))
+            .count();
+        assert_eq!(on_site, RACE_TINTS.len(), "the site has other race tints");
+        assert!(site.contains(&format!("DEFAULT_TINT = '{DEFAULT_TINT}'")));
+    }
+
+    #[test]
     fn a_layout_names_the_component_in_each_slot() {
         let layout = json!({"slots": [
             {"id": 3, "configuration": {"nanocoating": {"id": 30}}},

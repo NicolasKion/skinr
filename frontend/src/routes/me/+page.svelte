@@ -126,7 +126,7 @@
 {#if mine}
   <div>
     <main
-      class="min-h-dvh px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10"
+      class="min-h-svh px-6 pt-28 pb-24 lg:pr-[calc(var(--peek)+2rem)] lg:pl-10"
       style:--peek={peek.css}
     >
       <header class="mb-16 flex flex-wrap items-end justify-between gap-6">
@@ -364,7 +364,7 @@
   </div>
 {:else}
   <main
-    class="relative z-20 mx-auto flex min-h-dvh max-w-3xl flex-col items-center justify-center px-6 py-28 text-center"
+    class="relative z-20 mx-auto flex min-h-svh max-w-3xl flex-col items-center justify-center px-6 py-28 text-center"
     style:--tint={raceTint(null)}
   >
     <p class="eyebrow mb-5 text-muted-foreground">Your SKINRs</p>

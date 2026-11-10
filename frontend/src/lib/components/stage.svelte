@@ -9,6 +9,7 @@
   import type { Engine, ShowTransition } from '#lib/viewer/engine.js';
   import { HERO_POSE, SPHERE_SPAN, TRANSITION_MS, easeInOut } from '#lib/viewer/poses.js';
   import { preloadShip } from '#lib/viewer/resources.js';
+  import { viewport } from '#lib/viewport.svelte.js';
 
   /**
    * How much of the dock's visible width or height a ship's bounding sphere
@@ -25,7 +26,6 @@
 
   let host: HTMLDivElement;
   let engine = $state<Engine | null>(null);
-  let viewport = $state({ width: 1, height: 1 });
 
   onMount(() => {
     let alive = true;
@@ -412,10 +412,12 @@
       );
   });
 
-  // The wheel zooms in a preview fixed to the screen (the explorer's and the
-  // SKINR pages' panel); where the page scrolls (a ship's page) it needs ctrl.
+  // A preview fixed to the screen (the explorer's and the SKINR pages'
+  // panel) takes the wheel and every drag itself. Where the page scrolls
+  // under the canvas (a ship's page) the wheel and vertical swipes scroll it:
+  // zooming needs ctrl, and a finger orbits sideways only.
   $effect(() => {
-    engine?.renderer.setWheelZoom(stage.dock?.fixed === true);
+    engine?.renderer.setOwnsScroll(stage.dock?.fixed === true);
   });
 
   // Draw the blueprint once the ship (in this livery) is fully on stage.
@@ -438,10 +440,8 @@
   });
 </script>
 
-<svelte:window bind:innerWidth={viewport.width} bind:innerHeight={viewport.height} />
-
 <div
-  class="stage top-0 left-0 z-10 h-dvh w-screen origin-top-left {anchored ? 'absolute' : 'fixed'}"
+  class="stage top-0 left-0 z-10 h-svh w-screen origin-top-left {anchored ? 'absolute' : 'fixed'}"
   class:leaping
   class:unsettled={instant}
   class:gone={!visible}
@@ -455,7 +455,7 @@
   <div
     bind:this={host}
     class="canvas-host h-full w-full"
-    style:transform="translate({placement.x * 100}vw, {(placement.y ?? 0) * 100}dvh) scale({placement.scale})"
+    style:transform="translate({placement.x * 100}vw, {(placement.y ?? 0) * 100}svh) scale({placement.scale})"
     style:opacity={1 - dim * DIM_OPACITY}
   ></div>
 </div>
