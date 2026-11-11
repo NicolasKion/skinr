@@ -83,6 +83,8 @@ async function start(): Promise<Engine> {
   let latest = 0;
   /** The DNA last handed to the renderer: on screen, or queued to slide in. */
   let target: string | null = null;
+  /** Whether `target` made it on stage, once it has (or was overtaken). */
+  let arrival: Promise<boolean> = Promise.resolve(false);
   const ready: Engine = {
     build: files.build,
     renderer,
@@ -91,15 +93,20 @@ async function start(): Promise<Engine> {
     },
     async show(dna: string, transition: ShowTransition = { kind: 'fly' }) {
       const request = ++latest;
-      if (dna === target) return true;
+      // Asked for again while it is still on its way in: it is shown when
+      // that arrival is, not yet (the ship before it may still be on stage).
+      if (dna === target) return arrival;
       const values = await sof.BuildValuesFromDNAAsync(dna);
       if (request !== latest) return false;
       target = dna;
       if (transition.kind === 'slide') {
-        return renderer.slideToShip(values, transition.direction, transition.onGlide);
+        arrival = renderer.slideToShip(values, transition.direction, transition.onGlide);
+      } else if (transition.kind === 'pin') {
+        arrival = renderer.pinShip(values, transition.rect);
+      } else {
+        arrival = renderer.setShip(values);
       }
-      if (transition.kind === 'pin') return renderer.pinShip(values, transition.rect);
-      return renderer.setShip(values);
+      return arrival;
     },
   };
   // For poking at the live scene from the console or a test script while
