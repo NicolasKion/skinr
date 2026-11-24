@@ -2,32 +2,11 @@ import { error, redirect } from '@sveltejs/kit';
 import { apiGet } from '#lib/server/api.js';
 import type { ShipDetail, ShipSkinrs } from '#lib/types.js';
 import { designHref, parseLivery, shipHref, skinHref, slugify } from '#lib/urls.js';
-import { shipFileUrls } from '#lib/viewer/resources.js';
+import { filesAhead } from '#lib/server/files-ahead.js';
 import type { PageServerLoad } from './$types';
 
 /** What the page shows when the SKINR designs cannot be loaded. */
 const NO_SKINRS: ShipSkinrs = { slot_materials: {}, designs: [], components: {} };
-
-/**
- * The game files the ship will need, for the page's head: the browser then
- * starts on them with the HTML, long before the engine can ask. Only a head
- * start, so nothing when the API cannot say.
- */
-async function filesAhead(
-  fetch: typeof globalThis.fetch,
-  id: number,
-  dna: string,
-): Promise<string[]> {
-  try {
-    const [build, listed] = await Promise.all([
-      fetch('/cdn/build').then((response) => response.json() as Promise<{ build: string }>),
-      fetch(`/api/ships/${id}/files`).then((response) => response.json() as Promise<string[]>),
-    ]);
-    return shipFileUrls(build.build, dna, listed);
-  } catch {
-    return [];
-  }
-}
 
 /**
  * A ship's page, at its name (`/ships/kronos`), optionally wearing one of its

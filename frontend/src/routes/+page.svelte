@@ -7,6 +7,7 @@
   import type { TransitionConfig } from 'svelte/transition';
   import { ArrowRight, LoaderCircle } from '@lucide/svelte';
   import CardCarousel from '#lib/components/card-carousel.svelte';
+  import FilesAhead from '#lib/components/files-ahead.svelte';
   import ShipThumbnail from '#lib/components/ship-thumbnail.svelte';
   import * as Carousel from '#lib/components/ui/carousel/index.js';
   import FactionEmblem from '#lib/components/faction-emblem.svelte';
@@ -18,7 +19,7 @@
   import { nav } from '#lib/nav.svelte.js';
   import { isPlainClick } from '#lib/clicks.js';
   import { stage, useScene } from '#lib/stage.svelte.js';
-  import { viewport } from '#lib/viewport.svelte.js';
+  import { WIDE, viewport } from '#lib/viewport.svelte.js';
   import type { ShipSummary } from '#lib/types.js';
 
   let { data } = $props();
@@ -79,17 +80,6 @@
     return index === -1 ? CLASS_ORDER.length : index;
   };
 
-  /** Ships worth opening on, one picked at random for a first visit. */
-  const FEATURED = new Set([
-    'Raven',
-    'Megathron',
-    'Apocalypse',
-    'Tempest',
-    'Astero',
-    'Nightmare',
-    'Vindicator',
-  ]);
-
   /** The builder tab picked: a race or a faction's key, or null for all. */
   let builder = $state<string | null>(null);
   let query = $state('');
@@ -124,12 +114,12 @@
   // The stage docks in the preview panel beside the explorer; picking another
   // ship slides its hull in beside the last one.
   useScene(() => ({ place: 'peek', slideShips: true }));
-  // It opens on a featured ship, where there is a panel to show one (a
-  // phone has none, and does not load a ship it never shows).
+  // It opens on the featured ship the server picked (featured.ts), where
+  // there is a panel to show one (a phone has none, and does not load a ship
+  // it never shows; nor do the preload links in the head, by their media).
   $effect(() => {
     if (stage.ship || !viewport.wide) return;
-    const candidates = catalog.ships.filter((ship) => FEATURED.has(ship.name));
-    const pick = candidates[Math.floor(Math.random() * candidates.length)] ?? catalog.ships[0];
+    const pick = catalog.ships.find((ship) => ship.id === data.featured) ?? catalog.ships[0];
     if (pick) stage.show(pick);
   });
 
@@ -259,6 +249,8 @@
     }
   }
 </script>
+
+<FilesAhead urls={data.filesAhead} media={WIDE} />
 
 <Seo
   title="skinr.space"

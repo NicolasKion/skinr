@@ -3,21 +3,30 @@
   // transparency) is used as a mask over a gradient in the page's tint, so it
   // reads as a glow behind the ship rather than a grey stamp. On a light page
   // a pale glow vanishes, so there it turns into a deeper, stronger shade.
+  //
+  // The logos are large images. One marked `late` (the many behind cards) is
+  // fetched only once the first ship is up, so it does not share the line
+  // with the ship's own files while the boot screen still covers the page.
+  import { stage } from '#lib/stage.svelte.js';
+
   let {
     url,
     tint,
     opacity = 0.14,
+    late = false,
     class: className = '',
-  }: { url: string; tint: string; opacity?: number; class?: string } = $props();
+  }: { url: string; tint: string; opacity?: number; late?: boolean; class?: string } = $props();
 </script>
 
-<div
-  class="emblem {className}"
-  style:--emblem="url('{url}')"
-  style:--emblem-tint={tint}
-  style:--emblem-opacity={opacity}
-  aria-hidden="true"
-></div>
+{#if !late || stage.booted}
+  <div
+    class="emblem {className}"
+    style:--emblem="url('{url}')"
+    style:--emblem-tint={tint}
+    style:--emblem-opacity={opacity}
+    aria-hidden="true"
+  ></div>
+{/if}
 
 <style>
   .emblem {

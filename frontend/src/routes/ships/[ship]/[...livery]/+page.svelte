@@ -4,6 +4,7 @@
   // chapter is on screen decides where the stage sits (`useScene`); each
   // chapter is its own component beside this one.
   import Blueprint from '#lib/components/blueprint.svelte';
+  import FilesAhead from '#lib/components/files-ahead.svelte';
   import Seo from '#lib/components/seo.svelte';
   import SheetMargin from '#lib/components/sheet-margin.svelte';
   import { raceTint, shipBuilders } from '#lib/eve.js';
@@ -138,12 +139,7 @@
   $effect(() => () => nav.clear());
 </script>
 
-<svelte:head>
-  <!-- The ship's game files, on their way before any script runs (resources.ts, preloadShip). -->
-  {#each data.filesAhead as href (href)}
-    <link rel="preload" as="fetch" crossorigin="anonymous" fetchpriority="low" {href} />
-  {/each}
-</svelte:head>
+<FilesAhead urls={data.filesAhead} />
 
 <Seo
   title={seo.title}

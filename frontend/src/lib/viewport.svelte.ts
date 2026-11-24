@@ -15,7 +15,7 @@ const SERVER_SIZE = { width: 1440, height: 900 };
  * shows and a chapter's text sits beside its ship. Script asks `viewport.wide`;
  * CSS uses `lg:` or this same query.
  */
-const WIDE = '(min-width: 64rem)';
+export const WIDE = '(min-width: 64rem)';
 
 /** An element as tall as the small viewport, to read `100svh` in pixels. */
 function probe(): HTMLElement {

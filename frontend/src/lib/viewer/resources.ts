@@ -125,17 +125,80 @@ export function shipFileUrls(build: string, dna: string | null, listed: string[]
   return [...new Set(paths.map((path) => resUrl(build, path)))];
 }
 
+/**
+ * Files with work waiting behind them once they land: the catalog (the ship
+ * is built from it), graphs and shaders (translated in workers). Together a
+ * few hundred kB of a ship's megabytes.
+ */
+const LIGHT_FILES = /\.(black|red|sm_depth)$/;
+
+/**
+ * Whether a file is fetched at once, even beside the engine's own code. The
+ * rest (geometry, textures) is most of the bytes, and servers share a
+ * connection evenly between everything on it: asked for at once, they would
+ * hold the code back to the end, and nothing can start without it.
+ */
+export function isLight(url: string): boolean {
+  return LIGHT_FILES.test(url);
+}
+
+/**
+ * Heavy files under way while the engine's code is still coming: enough to
+ * keep the line busy while the code is only being run, few enough to leave
+ * it most of the line while it downloads.
+ */
+const HEAVY_BESIDE_CODE = 2;
+
+/** Lets `limit` holders in at a time until it is opened, then everyone. */
+export function createGate(limit: number) {
+  const waiting: (() => void)[] = [];
+  let inside = 0;
+  let open = false;
+  return {
+    /** Resolves when it is the caller's turn, with the function to call when done. */
+    enter(): Promise<() => void> {
+      const leave = () => {
+        inside -= 1;
+        const next = waiting.shift();
+        if (next) next();
+      };
+      return new Promise((resolve) => {
+        const go = () => {
+          inside += 1;
+          resolve(leave);
+        };
+        if (open || inside < limit) go();
+        else waiting.push(go);
+      });
+    },
+    /** Lets in everyone waiting, and everyone after. */
+    open() {
+      open = true;
+      for (const next of waiting.splice(0)) next();
+    },
+  };
+}
+
+/** What the heavy files pass through: narrow until the engine's code is in. */
+const heavy = createGate(HEAVY_BESIDE_CODE);
+
+/** Names the load of the engine's code; once it settles the heavy files all go. */
+export function afterCode(loading: Promise<unknown>) {
+  void loading.catch(() => {}).then(() => heavy.open());
+}
+
 /** URLs already fetched ahead, so a ship picked twice is not fetched twice. */
 const preloaded = new Set<string>();
 
 /**
- * Fetches every game file a ship's render used (src/server/ship_files.rs),
- * all at once, into the browser's cache. The runtime would otherwise find
- * them one after another, hull first, then its textures and shaders; this
- * way they are on their way while the engine is still starting. The URLs are
+ * Fetches every game file a ship's render used (src/server/ship_files.rs)
+ * into the browser's cache. The runtime would otherwise find them one after
+ * another, hull first, then its textures and shaders; this way they are on
+ * their way while the engine is still starting: the light ones at once, the
+ * heavy ones a few at a time until the engine's code is in (`isLight`). The URLs are
  * immutable, so the runtime's own requests are then answered from the cache.
- * A ship's own page has the same URLs in its head, where the browser starts
- * on them before any script runs; these fetches then join those.
+ * A page that opens on a ship has the light ones in its head, where the
+ * browser starts on them before any script runs; these fetches join those.
  */
 export async function preloadShip(id: number, dna: string | null = null) {
   try {
@@ -145,15 +208,18 @@ export async function preloadShip(id: number, dna: string | null = null) {
     for (const url of urls) preloaded.add(url);
     await Promise.all(
       urls.map(async (url) => {
+        const leave = isLight(url) ? null : await heavy.enter();
         try {
           // Low priority: the engine's own requests, which it waits on, go first.
           const bytes = await (await fetch(url, { priority: 'low' })).arrayBuffer();
+          leave?.();
           // Shaders are translated while the engine is still starting (effects.ts).
           if (isEffectSource(url)) {
             const { translations } = await import('./effect-workers');
             void translations.prepare(resPath(url), new Uint8Array(bytes));
           }
         } catch {
+          leave?.();
           preloaded.delete(url);
         }
       }),

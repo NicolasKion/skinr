@@ -1,7 +1,7 @@
 // One engine per page load: the client build, the Space Object Factory and the
 // WebGPU renderer are expensive to set up and the runtime keeps global state,
 // so every viewport shares them.
-import { openGameFiles, openSof } from './resources';
+import { afterCode, openGameFiles, openSof } from './resources';
 import type { ScreenRect } from './poses';
 import type { Blueprint } from './blueprint';
 import type { ShipRenderer } from './renderer';
@@ -88,11 +88,12 @@ async function start(): Promise<Engine> {
   report('index');
   // The engine's code (loaded only in the browser, and only once a viewport
   // asks for it) downloads while the build is looked up.
-  const [files, { startRuntime }, { ShipRenderer }, { pumped }] = await Promise.all([
+  const code = Promise.all([import('./backend'), import('./renderer'), import('./pump')]);
+  // A ship's heavy files queue behind the code (resources.ts, `isLight`).
+  afterCode(code);
+  const [files, [{ startRuntime }, { ShipRenderer }, { pumped }]] = await Promise.all([
     openGameFiles(),
-    import('./backend'),
-    import('./renderer'),
-    import('./pump'),
+    code,
   ]);
   let renderer: ShipRenderer | null = null;
   const runtime = await startRuntime(files, (path, error) => renderer?.onMissing?.(path, error));
