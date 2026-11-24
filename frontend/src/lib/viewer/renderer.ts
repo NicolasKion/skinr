@@ -4,7 +4,7 @@
 // the camera is camera.ts, the section views sections.ts.
 import { blue } from '@carbonenginejs/runtime/blue';
 
-import { createBackend, type Backend } from './backend';
+import { createBackend, type Backend, type Runtime } from './backend';
 import {
   BLUEPRINT_VIEWS,
   assembleBlueprint,
@@ -24,7 +24,6 @@ import {
   type CameraPose,
   type ScreenRect,
 } from './poses';
-import type { GameFiles } from './resources';
 import { SectionViews, type Section, type SectionView } from './sections';
 import { buildShip } from './ship';
 
@@ -152,14 +151,9 @@ export class ShipRenderer {
   private lastFrame = 0;
   private reported = new Set<string>();
 
-  static async create(files: GameFiles): Promise<ShipRenderer> {
+  static async create(runtime: Runtime): Promise<ShipRenderer> {
     const canvas = document.createElement('canvas');
-    let renderer: ShipRenderer | null = null;
-    const backend = await createBackend(canvas, files, (path, error) =>
-      renderer?.onMissing?.(path, error),
-    );
-    renderer = new ShipRenderer(canvas, backend);
-    return renderer;
+    return new ShipRenderer(canvas, await createBackend(canvas, runtime));
   }
 
   private constructor(canvas: HTMLCanvasElement, backend: Backend) {

@@ -5,6 +5,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type SpaceObjectFactory = any;
 
+import { worthPreloading } from './unused';
+
 /** The scheme of a game file path. */
 const RES_ROOT = 'res:/';
 
@@ -98,7 +100,9 @@ export async function preloadShip(id: number) {
     const [files, response] = await Promise.all([openGameFiles(), fetch(`/api/ships/${id}/files`)]);
     if (!response.ok) return;
     const paths = (await response.json()) as string[];
-    const urls = paths.map((path) => files.url(path)).filter((url) => !preloaded.has(url));
+    const urls = worthPreloading(paths)
+      .map((path) => files.url(path))
+      .filter((url) => !preloaded.has(url));
     for (const url of urls) preloaded.add(url);
     await Promise.all(
       urls.map((url) =>
@@ -113,13 +117,22 @@ export async function preloadShip(id: number) {
   }
 }
 
+/**
+ * Opens the Space Object Factory. Its catalog files load through the
+ * resource manager, so the runtime must have its file source by now
+ * (backend.ts, `startRuntime`).
+ */
 export async function openSof(files: GameFiles): Promise<SpaceObjectFactory> {
   // Loaded with the engine, not with this module (which the tests import).
-  const { EveSOF } = await import('@carbonenginejs/runtime/sof');
+  const [{ EveSOF }, { blue }, { pumped }] = await Promise.all([
+    import('@carbonenginejs/runtime/sof'),
+    import('@carbonenginejs/runtime/blue'),
+    import('./pump'),
+  ]);
   const sof = await new EveSOF().Register({
-    lazyData: { source: (path: string) => fetch(files.url(path)) },
+    lazyData: { source: (path: string) => blue.resMan.LoadObject(path) },
     resources: { exists: (path: string) => files.exists(path) },
   });
-  await sof.InitializeAsync();
+  await pumped(sof.InitializeAsync());
   return sof;
 }

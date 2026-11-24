@@ -23,15 +23,14 @@ import { CjsWebgpuRenderContextAL, CjsWebgpuRenderTarget } from 'cjs-webgpu-inte
 import { alignBlockTextures } from './block-align';
 import { Hologram, gpuUsage } from './hologram';
 import { STUDIO_LOOK, applyLighting, takeLighting } from './lighting';
+import { pumped } from './pump';
 import type { GameFiles } from './resources';
+import { standIn } from './unused';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** A Caldari region backdrop: sun direction, ambient and reflection maps. */
 const DEFAULT_SCENE = 'res:/dx9/scene/universe/c01_cube.red';
-
-/** How often Blue is pumped while the scene loads, before the frame loop runs. */
-const PUMP_INTERVAL_MS = 16;
 
 /**
  * The client ships dx11 effects; the runtime translates each permutation to
@@ -87,14 +86,15 @@ export interface Backend {
 }
 
 /**
- * The resource manager reads every res:/ path through the file index. A read
- * that fails (not in the index, or the CDN refused it) is reported to
- * `onMissing` before the runtime gets the error.
+ * The resource manager reads every res:/ path through the file index (a
+ * file that is never drawn as its small stand-in, unused.ts). A read that
+ * fails (not in the index, or the CDN refused it) is reported to `onMissing`
+ * before the runtime gets the error.
  */
 function createSource(files: GameFiles, onMissing: (path: string, error: Error) => void) {
   return {
     Read: (path: string) =>
-      files.read(path).catch((error: Error) => {
+      files.read(standIn(path)).catch((error: Error) => {
         onMissing(path, error);
         throw error;
       }),
@@ -126,38 +126,41 @@ function clearCanvasEachScene(target: any) {
 
 /** Loads one of EVE's universe scenes, or an empty scene when it cannot. */
 async function loadScene(path: string) {
-  // Loads only advance on Blue ticks, and the frame loop that pumps them
-  // has not started yet.
-  const pump = setInterval(() => blue.os.PumpOS(), PUMP_INTERVAL_MS);
   try {
-    const scene = await blue.resMan.LoadObject(path);
+    const scene = await pumped(blue.resMan.LoadObject(path));
     if (scene instanceof EveSpaceScene) return scene;
     console.warn('Not an EveSpaceScene:', path);
   } catch (error) {
     console.warn(`Could not load ${path}`, error);
-  } finally {
-    clearInterval(pump);
   }
   return new EveSpaceScene();
 }
 
-/** Starts the engine drawing into `canvas`, with the studio scene loaded. */
-export async function createBackend(
-  canvas: HTMLCanvasElement,
+/** The runtime with its file source set, before anything is drawn. */
+export type Runtime = any;
+
+/**
+ * Starts the runtime: from here the resource manager reads game files, which
+ * the scene and the Space Object Factory both load through.
+ */
+export function startRuntime(
   files: GameFiles,
   onMissing: (path: string, error: Error) => void,
-): Promise<Backend> {
-  if (!navigator.gpu) throw new Error('This browser has no WebGPU.');
+): Promise<Runtime> {
   // The library's defaults register every format, resource type and object
   // builder a ship needs (PNG, textures, geometry, composite textures, black).
-  const runtime = await new CjsLibrary({
+  return new CjsLibrary({
     resMan: { source: createSource(files, onMissing), useWorkerLoading: false },
     // Callbacks run on the main thread, pumped by PumpOS each frame.
     callbackMan: { useWorkers: false },
     callbackModules: CALLBACK_MODULES,
     effects: EFFECTS,
   }).Initialize({ sof: null, characterLibrary: null });
+}
 
+/** Starts `runtime` drawing into `canvas`, with the studio scene loaded. */
+export async function createBackend(canvas: HTMLCanvasElement, runtime: Runtime): Promise<Backend> {
+  if (!navigator.gpu) throw new Error('This browser has no WebGPU.');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('No WebGPU adapter is available.');
   if (!adapter.features.has(REQUIRED_FEATURE)) {

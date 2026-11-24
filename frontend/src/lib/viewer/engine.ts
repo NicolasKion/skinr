@@ -69,15 +69,26 @@ export function getEngine(onStage?: (stage: EngineStage) => void): Promise<Engin
 
 async function start(): Promise<Engine> {
   report('index');
-  const files = await openGameFiles();
+  // The engine's code (loaded only in the browser, and only once a viewport
+  // asks for it) downloads while the build is looked up.
+  const [files, { startRuntime }, { ShipRenderer }] = await Promise.all([
+    openGameFiles(),
+    import('./backend'),
+    import('./renderer'),
+  ]);
+  let renderer: ShipRenderer | null = null;
+  const runtime = await startRuntime(files, (path, error) => renderer?.onMissing?.(path, error));
 
+  // The factory reads its catalog while the GPU and the scene come up.
   report('sof');
-  const sof = await openSof(files);
-
-  report('gpu');
-  // Loaded only in the browser, and only once a viewport asks for it.
-  const { ShipRenderer } = await import('./renderer');
-  const renderer = await ShipRenderer.create(files);
+  const [sof, created] = await Promise.all([
+    openSof(files).then((opened) => {
+      report('gpu');
+      return opened;
+    }),
+    ShipRenderer.create(runtime),
+  ]);
+  renderer = created;
 
   report('ready');
   let latest = 0;

@@ -48,7 +48,7 @@ export interface Studio {
 
 /** The site's universe scene: sun, ambient and reflection maps. */
 const SCENE = 'res:/dx9/scene/universe/c01_cube.red';
-/** How often Blue is pumped while the scene loads. */
+/** How often Blue is pumped while the scene or a catalog file loads. */
 const PUMP_INTERVAL_MS = 16;
 /**
  * The engine time every frame is drawn at, in seconds. Blinking lights,
@@ -138,6 +138,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   const { placement } = await import('../../src/lib/viewer/placement.ts');
   const { buildShip } = await import('../../src/lib/viewer/ship.ts');
   const { alignBlockTextures } = await import('../../src/lib/viewer/block-align.ts');
+  const { standIn } = await import('../../src/lib/viewer/unused.ts');
   const { STUDIO_LOOK, applyLighting, placeSun, takeLighting } =
     await import('../../src/lib/viewer/lighting.ts');
   const { FIELD_OF_VIEW, THUMBNAIL_FRAMING, THUMBNAIL_POSE } =
@@ -180,7 +181,8 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   /** Files read and resources looked up for the first time, ever growing. */
   let requests = 0;
   const read = async (path: string) => {
-    const url = resolve(path);
+    // Files the page never draws are read as their stand-ins here too.
+    const url = resolve(standIn(path));
     try {
       if (!url) throw new Error(`Not in the file index: ${path}`);
       requests += 1;
@@ -192,18 +194,6 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
       throw error;
     }
   };
-
-  const sof = await new EveSOF().Register({
-    lazyData: {
-      source: async (path: string) => {
-        const url = resolve(path);
-        if (!url) throw new Error(`Not in the file index: ${path}`);
-        return new Response((await cached(cache, url)) as BodyInit);
-      },
-    },
-    resources: { exists: async (path: string) => !!library.Resolve(path) },
-  });
-  await sof.InitializeAsync();
 
   // The library's defaults register every format and resource type a ship
   // needs; the client's dx11 effects are translated to WebGPU on first use.
@@ -217,7 +207,24 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
       permutations: 'onDemand',
       shaderModel: 'high',
     },
-  }).Initialize({ sof, characterLibrary: null });
+  }).Initialize({ sof: null, characterLibrary: null });
+
+  /** Loads only advance on Blue ticks: keeps them coming until `work` settles. */
+  async function pumped<T>(work: Promise<T>): Promise<T> {
+    const pump = setInterval(() => blue.os.PumpOS(), PUMP_INTERVAL_MS);
+    try {
+      return await work;
+    } finally {
+      clearInterval(pump);
+    }
+  }
+
+  // The factory's catalog loads through the resource manager.
+  const sof = await new EveSOF().Register({
+    lazyData: { source: (path: string) => blue.resMan.LoadObject(path) },
+    resources: { exists: async (path: string) => !!library.Resolve(path) },
+  });
+  await pumped(sof.InitializeAsync());
 
   const adapter = await installWebgpu().requestAdapter({
     powerPreference: 'high-performance',
@@ -324,10 +331,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
     tri.InitD3DDevice();
   }
 
-  // Loads only advance on Blue ticks.
-  const pump = setInterval(() => blue.os.PumpOS(), PUMP_INTERVAL_MS);
-  const loaded = await blue.resMan.LoadObject(SCENE).catch(() => null);
-  clearInterval(pump);
+  const loaded = await pumped(blue.resMan.LoadObject(SCENE)).catch(() => null);
   const scene = loaded instanceof EveSpaceScene ? loaded : new EveSpaceScene();
   const lighting = takeLighting(scene);
   const view = new core.TriView();
@@ -449,7 +453,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
     gpuErrors = [];
     random.crtSrand(RANDOM_SEED);
     random.triSrand(RANDOM_SEED);
-    const values = await sof.BuildValuesFromDNAAsync(dna);
+    const values = await pumped(sof.BuildValuesFromDNAAsync(dna));
     const ship = buildShip(values);
     ship.translationCurve = placement([0, 0, 0]);
     scene.objects.push(ship);
