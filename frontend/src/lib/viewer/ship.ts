@@ -6,6 +6,8 @@
 import { blue } from '@carbonenginejs/runtime/blue';
 import { CjsSchema } from '@carbonenginejs/runtime/schema';
 
+import { withoutHitEffects } from './unused.ts';
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** The ship's slots the SOF can leave as an external reference. */
@@ -17,9 +19,11 @@ const EXTERNAL_REF = 'CjsExternalRef';
 /**
  * Builds the ship without its external curves, then loads each and puts it
  * in its slot. The ship is drawn meanwhile, just not animated by them; a
- * curve that fails to load leaves its slot empty.
+ * curve that fails to load leaves its slot empty. Shield and armour hits are
+ * left out (unused.ts).
  */
 export function buildShip(values: any) {
+  values = withoutHitEffects(values);
   // oxlint-disable-next-line no-underscore-dangle -- the SOF's values name their class in `_type`
   const refs = CURVE_SLOTS.filter((slot) => values[slot]?._type === EXTERNAL_REF).map(
     (slot) => [slot, values[slot].resPath as string] as const,
