@@ -41,6 +41,8 @@ let engine: Promise<Engine> | null = null;
 
 /** The DNA the first ship is expected to have (`expectShip`). */
 let expected: string | null = null;
+/** Builds the expected ship's values, once the factory is open and until a ship is asked for. */
+let buildAhead: ((dna: string) => void) | null = null;
 
 /**
  * Names the ship the page will ask for first, so its values are built as
@@ -49,6 +51,7 @@ let expected: string | null = null;
  */
 export function expectShip(dna: string) {
   expected = dna;
+  buildAhead?.(dna);
 }
 
 /** Where dev builds put the engine for poking at from the console or a test script. */
@@ -58,6 +61,8 @@ const DEBUG_HANDLE = '__shipEngine';
 const watchers = new Set<(stage: EngineStage) => void>();
 let reached: EngineStage | null = null;
 function report(stage: EngineStage) {
+  // On the browser's performance timeline too, to see where a start spends its time.
+  performance.mark(`engine:${stage}`);
   reached = stage;
   for (const watcher of watchers) watcher(stage);
 }
@@ -99,11 +104,14 @@ async function start(): Promise<Engine> {
   const [sof, created] = await Promise.all([
     openSof(files).then((opened) => {
       report('gpu');
-      if (expected) {
-        ahead = { dna: expected, values: pumped(opened.BuildValuesFromDNAAsync(expected)) };
+      buildAhead = (dna) => {
+        if (ahead?.dna === dna) return;
+        const values: Promise<unknown> = pumped(opened.BuildValuesFromDNAAsync(dna));
         // A failure is met again, and reported, by the build `show` then makes.
-        ahead.values.catch(() => {});
-      }
+        values.catch(() => {});
+        ahead = { dna, values };
+      };
+      if (expected) buildAhead(expected);
       return opened;
     }),
     ShipRenderer.create(runtime),
@@ -113,6 +121,8 @@ async function start(): Promise<Engine> {
   const valuesOf = async (dna: string) => {
     const early = ahead as { dna: string; values: Promise<unknown> } | null;
     ahead = null;
+    // From the first ship on, the page asks for what it wants itself.
+    buildAhead = null;
     if (early?.dna === dna) {
       try {
         return await early.values;
@@ -141,6 +151,7 @@ async function start(): Promise<Engine> {
       // that arrival is, not yet (the ship before it may still be on stage).
       if (dna === target) return arrival;
       const values = await valuesOf(dna);
+      performance.mark('engine:values');
       if (request !== latest) return false;
       target = dna;
       if (transition.kind === 'slide') {

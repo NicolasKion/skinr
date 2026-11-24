@@ -56,6 +56,13 @@ const CALLBACK_MODULES = {
   'dds.compress': compressionModule,
 };
 
+/**
+ * Files the resource manager reads at once. Its default of 8 suits a disk;
+ * here a read is a request the browser multiplexes, or a shader waiting on
+ * its translation, and neither should hold up the files queued behind it.
+ */
+const CONCURRENT_LOADS = 64;
+
 /** EVE's textures are BC compressed; the rest only help when present. */
 const REQUIRED_FEATURE = 'texture-compression-bc';
 const OPTIONAL_FEATURES = [
@@ -158,7 +165,11 @@ export function startRuntime(
   // The library's defaults register every format, resource type and object
   // builder a ship needs (PNG, textures, geometry, composite textures, black).
   return new CjsLibrary({
-    resMan: { source: createSource(files, onMissing), useWorkerLoading: false },
+    resMan: {
+      source: createSource(files, onMissing),
+      useWorkerLoading: false,
+      maxConcurrentLoads: CONCURRENT_LOADS,
+    },
     // Callbacks run on the main thread, pumped by PumpOS each frame.
     callbackMan: { useWorkers: false },
     callbackModules: CALLBACK_MODULES,

@@ -46,8 +46,13 @@ const SLIDE_SPACING = 1.2;
 const EDGE_MARGIN = 1.4;
 /** How long the camera takes to glide onto the incoming ship, in ms. */
 const SLIDE_DURATION = 1300;
-/** Frames the resource manager must stay idle before a ship counts as loaded. */
-const QUIET_FRAMES = 8;
+/**
+ * Frames the resource manager must stay idle before a ship counts as loaded.
+ * A file that lands can ask for more, which the next frame drawn requests; a
+ * frame beyond that is margin. (The render studio takes its picture on the
+ * first such frame.)
+ */
+const QUIET_FRAMES = 3;
 /** Go on anyway after this long, in ms, rather than wait on a resource that never lands. */
 const READY_TIMEOUT = 12000;
 

@@ -13,13 +13,17 @@ const NO_SKINRS: ShipSkinrs = { slot_materials: {}, designs: [], components: {} 
  * starts on them with the HTML, long before the engine can ask. Only a head
  * start, so nothing when the API cannot say.
  */
-async function filesAhead(fetch: typeof globalThis.fetch, ship: ShipDetail): Promise<string[]> {
+async function filesAhead(
+  fetch: typeof globalThis.fetch,
+  id: number,
+  dna: string,
+): Promise<string[]> {
   try {
     const [build, listed] = await Promise.all([
       fetch('/cdn/build').then((response) => response.json() as Promise<{ build: string }>),
-      fetch(`/api/ships/${ship.id}/files`).then((response) => response.json() as Promise<string[]>),
+      fetch(`/api/ships/${id}/files`).then((response) => response.json() as Promise<string[]>),
     ]);
-    return shipFileUrls(build.build, ship.dna, listed);
+    return shipFileUrls(build.build, dna, listed);
   } catch {
     return [];
   }
@@ -32,7 +36,14 @@ async function filesAhead(fetch: typeof globalThis.fetch, ship: ShipDetail): Pro
  * Picking another livery on the page only changes the path, which must not
  * load the page again, so the path is read untracked.
  */
-export const load: PageServerLoad = async ({ fetch, params, parent, url, untrack }) => {
+export const load: PageServerLoad = async ({
+  fetch,
+  params,
+  parent,
+  url,
+  untrack,
+  isDataRequest,
+}) => {
   const { catalog } = await parent();
   const [rest, search] = untrack(() => [params.livery, url.searchParams] as const);
   const byId = /^\d+$/.test(params.ship)
@@ -66,16 +77,27 @@ export const load: PageServerLoad = async ({ fetch, params, parent, url, untrack
   if (designById) redirect(308, designHref(ship, designById));
 
   let canonical = shipHref(ship);
+  /** The DNA the page opens with, as far as the server knows it. */
+  let dna = ship.dna;
   if (livery.kind === 'skin') {
     const skin = ship.skins.find((candidate) => slugify(candidate.name) === livery.slug);
     if (!skin) error(404, 'Skin not found.');
     canonical = skinHref(ship, skin);
+    dna = skin.dna;
   } else if (livery.kind === 'skinr') {
     const design = designs.designs.find((candidate) => candidate.id.startsWith(livery.prefix));
     if (!design) error(404, 'Design not found.');
     canonical = designHref(ship, design);
+    // The page works a design's DNA out itself; only its hull is certain here.
+    [dna] = ship.dna.split(':');
   }
   // A design renamed since its link was shared still lands, under its name now.
   if (untrack(() => url.pathname) !== canonical) redirect(308, canonical);
-  return { ship, skinrs: designs, filesAhead: await filesAhead(fetch, ship) };
+  return {
+    ship,
+    skinrs: designs,
+    // Only in the HTML the server sends: once the app runs, it fetches a
+    // ship's files itself (preloadShip), before a link could be added.
+    filesAhead: isDataRequest ? [] : await filesAhead(fetch, ship.id, dna),
+  };
 };
