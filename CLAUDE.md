@@ -17,6 +17,24 @@ theme or tooling, do what it does.
   zstd where accepted) and `/cdn/list/{build}/{folder}`. The API holds CCP's
   file index; the browser never loads it. `#lib/viewer/resources.ts` is the
   only client, and preloads a picked ship's files (`/api/ships/{id}/files`).
+- A first visit is mostly download, so what the viewer never draws is not
+  read: `#lib/viewer/unused.ts` names it (the backdrop cube, the hit effects,
+  the film grain) and the engine, the render studio and preloading all go
+  through it. A page that opens on a ship (its own, or the explorer with
+  the featured one the server picks) names the ship's light files (catalog,
+  shaders: `isLight`) as preload links in the HTML the server sends
+  (`#lib/server/files-ahead.ts`); `preloadShip` fetches the rest, the heavy
+  ones only a couple at a time until the engine's code is in, because
+  servers share a connection evenly and the code must not come last. The
+  engine starts with the app (`hooks.client.ts`), not with the stage.
+  `resUrl` is the one URL of a file: fetch nothing under `/cdn/res` by
+  another spelling, or it downloads twice. Faction emblems behind cards are
+  `late`: fetched once the first ship is up.
+- Shaders are translated to WebGPU off the main thread
+  (`#lib/viewer/effects.ts`, tested; `effect-workers.ts` has the workers and
+  the IndexedDB store, dropped with a new client build or translator). The
+  runtime's translator is wrapped to find the result waiting: an effect's
+  read resolves only once its translation is there.
 - Ship data comes from the native SDE import (`cargo run --bin sde_import`),
   never hand-written fixtures in production.
 - SDE text (descriptions and anything else from the game) is EVE HTML, not HTML.

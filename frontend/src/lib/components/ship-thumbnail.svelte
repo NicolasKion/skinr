@@ -59,6 +59,7 @@
         url={logoUrl}
         tint={raceTint(raceId)}
         opacity={EMBLEM_OPACITY}
+        late
         class="absolute inset-[14%]"
       />
     {/if}

@@ -1,7 +1,7 @@
 // One engine per page load: the client build, the Space Object Factory and the
 // WebGPU renderer are expensive to set up and the runtime keeps global state,
 // so every viewport shares them.
-import { openGameFiles, openSof } from './resources';
+import { afterCode, openGameFiles, openSof } from './resources';
 import type { ScreenRect } from './poses';
 import type { Blueprint } from './blueprint';
 import type { ShipRenderer } from './renderer';
@@ -39,6 +39,21 @@ export interface Engine {
 
 let engine: Promise<Engine> | null = null;
 
+/** The DNA the first ship is expected to have (`expectShip`). */
+let expected: string | null = null;
+/** Builds the expected ship's values, once the factory is open and until a ship is asked for. */
+let buildAhead: ((dna: string) => void) | null = null;
+
+/**
+ * Names the ship the page will ask for first, so its values are built as
+ * soon as the factory is open, while the GPU and the scene still come up.
+ * Only for a DNA the factory can build as it is (no pattern to register).
+ */
+export function expectShip(dna: string) {
+  expected = dna;
+  buildAhead?.(dna);
+}
+
 /** Where dev builds put the engine for poking at from the console or a test script. */
 const DEBUG_HANDLE = '__shipEngine';
 
@@ -46,6 +61,8 @@ const DEBUG_HANDLE = '__shipEngine';
 const watchers = new Set<(stage: EngineStage) => void>();
 let reached: EngineStage | null = null;
 function report(stage: EngineStage) {
+  // On the browser's performance timeline too, to see where a start spends its time.
+  performance.mark(`engine:${stage}`);
   reached = stage;
   for (const watcher of watchers) watcher(stage);
 }
@@ -69,15 +86,53 @@ export function getEngine(onStage?: (stage: EngineStage) => void): Promise<Engin
 
 async function start(): Promise<Engine> {
   report('index');
-  const files = await openGameFiles();
+  // The engine's code (loaded only in the browser, and only once a viewport
+  // asks for it) downloads while the build is looked up.
+  const code = Promise.all([import('./backend'), import('./renderer'), import('./pump')]);
+  // A ship's heavy files queue behind the code (resources.ts, `isLight`).
+  afterCode(code);
+  const [files, [{ startRuntime }, { ShipRenderer }, { pumped }]] = await Promise.all([
+    openGameFiles(),
+    code,
+  ]);
+  let renderer: ShipRenderer | null = null;
+  const runtime = await startRuntime(files, (path, error) => renderer?.onMissing?.(path, error));
 
+  // The factory reads its catalog while the GPU and the scene come up.
   report('sof');
-  const sof = await openSof(files);
-
-  report('gpu');
-  // Loaded only in the browser, and only once a viewport asks for it.
-  const { ShipRenderer } = await import('./renderer');
-  const renderer = await ShipRenderer.create(files);
+  /** The expected ship's values, under way since the factory opened. */
+  let ahead: { dna: string; values: Promise<unknown> } | null = null;
+  const [sof, created] = await Promise.all([
+    openSof(files).then((opened) => {
+      report('gpu');
+      buildAhead = (dna) => {
+        if (ahead?.dna === dna) return;
+        const values: Promise<unknown> = pumped(opened.BuildValuesFromDNAAsync(dna));
+        // A failure is met again, and reported, by the build `show` then makes.
+        values.catch(() => {});
+        ahead = { dna, values };
+      };
+      if (expected) buildAhead(expected);
+      return opened;
+    }),
+    ShipRenderer.create(runtime),
+  ]);
+  renderer = created;
+  /** A DNA's values: those built ahead for it, once, or a new build. */
+  const valuesOf = async (dna: string) => {
+    const early = ahead as { dna: string; values: Promise<unknown> } | null;
+    ahead = null;
+    // From the first ship on, the page asks for what it wants itself.
+    buildAhead = null;
+    if (early?.dna === dna) {
+      try {
+        return await early.values;
+      } catch {
+        // Built again below, so the error comes from the build that was asked for.
+      }
+    }
+    return sof.BuildValuesFromDNAAsync(dna);
+  };
 
   report('ready');
   let latest = 0;
@@ -96,7 +151,8 @@ async function start(): Promise<Engine> {
       // Asked for again while it is still on its way in: it is shown when
       // that arrival is, not yet (the ship before it may still be on stage).
       if (dna === target) return arrival;
-      const values = await sof.BuildValuesFromDNAAsync(dna);
+      const values = await valuesOf(dna);
+      performance.mark('engine:values');
       if (request !== latest) return false;
       target = dna;
       if (transition.kind === 'slide') {

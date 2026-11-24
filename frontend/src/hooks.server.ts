@@ -10,12 +10,18 @@ export const handle: Handle = ({ event, resolve }) => {
   });
 };
 
+/** What a server-side load asks Axum for: the API, and the client build under `/cdn`. */
+const AXUM_PATHS = ['/api', '/cdn'];
+
 // Server-side loads reach Axum directly; the browser goes through the
 // shared-origin proxy instead. Axum is another origin to fetch, so the
 // visitor's cookies (the session) are passed on by hand.
 export const handleFetch: HandleFetch = async ({ event, request, fetch }) => {
   const url = new URL(request.url);
-  if (url.origin === event.url.origin && url.pathname.startsWith('/api')) {
+  if (
+    url.origin === event.url.origin &&
+    AXUM_PATHS.some((prefix) => url.pathname.startsWith(`${prefix}/`))
+  ) {
     request = new Request(new URL(url.pathname + url.search, AXUM_URL), request);
     const cookie = event.request.headers.get('cookie');
     if (cookie) request.headers.set('cookie', cookie);

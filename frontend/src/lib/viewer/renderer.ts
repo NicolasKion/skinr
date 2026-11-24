@@ -4,7 +4,7 @@
 // the camera is camera.ts, the section views sections.ts.
 import { blue } from '@carbonenginejs/runtime/blue';
 
-import { createBackend, type Backend } from './backend';
+import { createBackend, type Backend, type Runtime } from './backend';
 import {
   BLUEPRINT_VIEWS,
   assembleBlueprint,
@@ -24,7 +24,6 @@ import {
   type CameraPose,
   type ScreenRect,
 } from './poses';
-import type { GameFiles } from './resources';
 import { SectionViews, type Section, type SectionView } from './sections';
 import { buildShip } from './ship';
 
@@ -47,8 +46,13 @@ const SLIDE_SPACING = 1.2;
 const EDGE_MARGIN = 1.4;
 /** How long the camera takes to glide onto the incoming ship, in ms. */
 const SLIDE_DURATION = 1300;
-/** Frames the resource manager must stay idle before a ship counts as loaded. */
-const QUIET_FRAMES = 8;
+/**
+ * Frames the resource manager must stay idle before a ship counts as loaded.
+ * A file that lands can ask for more, which the next frame drawn requests; a
+ * frame beyond that is margin. (The render studio takes its picture on the
+ * first such frame.)
+ */
+const QUIET_FRAMES = 3;
 /** Go on anyway after this long, in ms, rather than wait on a resource that never lands. */
 const READY_TIMEOUT = 12000;
 
@@ -152,14 +156,9 @@ export class ShipRenderer {
   private lastFrame = 0;
   private reported = new Set<string>();
 
-  static async create(files: GameFiles): Promise<ShipRenderer> {
+  static async create(runtime: Runtime): Promise<ShipRenderer> {
     const canvas = document.createElement('canvas');
-    let renderer: ShipRenderer | null = null;
-    const backend = await createBackend(canvas, files, (path, error) =>
-      renderer?.onMissing?.(path, error),
-    );
-    renderer = new ShipRenderer(canvas, backend);
-    return renderer;
+    return new ShipRenderer(canvas, await createBackend(canvas, runtime));
   }
 
   private constructor(canvas: HTMLCanvasElement, backend: Backend) {

@@ -4,6 +4,7 @@
   // chapter is on screen decides where the stage sits (`useScene`); each
   // chapter is its own component beside this one.
   import Blueprint from '#lib/components/blueprint.svelte';
+  import FilesAhead from '#lib/components/files-ahead.svelte';
   import Seo from '#lib/components/seo.svelte';
   import SheetMargin from '#lib/components/sheet-margin.svelte';
   import { raceTint, shipBuilders } from '#lib/eve.js';
@@ -137,6 +138,8 @@
   });
   $effect(() => () => nav.clear());
 </script>
+
+<FilesAhead urls={data.filesAhead} />
 
 <Seo
   title={seo.title}

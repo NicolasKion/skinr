@@ -2,6 +2,7 @@ import { error, redirect } from '@sveltejs/kit';
 import { apiGet } from '#lib/server/api.js';
 import type { ShipDetail, ShipSkinrs } from '#lib/types.js';
 import { designHref, parseLivery, shipHref, skinHref, slugify } from '#lib/urls.js';
+import { filesAhead } from '#lib/server/files-ahead.js';
 import type { PageServerLoad } from './$types';
 
 /** What the page shows when the SKINR designs cannot be loaded. */
@@ -14,7 +15,14 @@ const NO_SKINRS: ShipSkinrs = { slot_materials: {}, designs: [], components: {} 
  * Picking another livery on the page only changes the path, which must not
  * load the page again, so the path is read untracked.
  */
-export const load: PageServerLoad = async ({ fetch, params, parent, url, untrack }) => {
+export const load: PageServerLoad = async ({
+  fetch,
+  params,
+  parent,
+  url,
+  untrack,
+  isDataRequest,
+}) => {
   const { catalog } = await parent();
   const [rest, search] = untrack(() => [params.livery, url.searchParams] as const);
   const byId = /^\d+$/.test(params.ship)
@@ -48,16 +56,27 @@ export const load: PageServerLoad = async ({ fetch, params, parent, url, untrack
   if (designById) redirect(308, designHref(ship, designById));
 
   let canonical = shipHref(ship);
+  /** The DNA the page opens with, as far as the server knows it. */
+  let dna = ship.dna;
   if (livery.kind === 'skin') {
     const skin = ship.skins.find((candidate) => slugify(candidate.name) === livery.slug);
     if (!skin) error(404, 'Skin not found.');
     canonical = skinHref(ship, skin);
+    dna = skin.dna;
   } else if (livery.kind === 'skinr') {
     const design = designs.designs.find((candidate) => candidate.id.startsWith(livery.prefix));
     if (!design) error(404, 'Design not found.');
     canonical = designHref(ship, design);
+    // The page works a design's DNA out itself; only its hull is certain here.
+    [dna] = ship.dna.split(':');
   }
   // A design renamed since its link was shared still lands, under its name now.
   if (untrack(() => url.pathname) !== canonical) redirect(308, canonical);
-  return { ship, skinrs: designs };
+  return {
+    ship,
+    skinrs: designs,
+    // Only in the HTML the server sends: once the app runs, it fetches a
+    // ship's files itself (preloadShip), before a link could be added.
+    filesAhead: isDataRequest ? [] : await filesAhead(fetch, ship.id, dna),
+  };
 };
