@@ -19,6 +19,25 @@ const STAND_INS: Record<string, string> = {
 const HIT_EFFECT_FILES =
   /\/fisfx\/impact\/|\/texture\/fx\/3d\/3dfx_shield|shieldimpactgradient|unitsphere_shieldgeo|\/fx\/impact\//;
 
+/**
+ * Post-processing is not driven here, yet its renderer asks for the film
+ * grain's 770 kB noise as soon as it exists. It gets one transparent pixel.
+ */
+const NEVER_READ = new Set(['res:/texture/global/film_grain_noise.png']);
+
+/** A 1x1 transparent PNG. */
+const BLANK_PNG = Uint8Array.from(
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  ),
+  (character) => character.charCodeAt(0),
+);
+
+/** The bytes to hand out for a file that is never read from the game, else null. */
+export function blank(path: string): Uint8Array | null {
+  return NEVER_READ.has(path.toLowerCase()) ? BLANK_PNG.slice() : null;
+}
+
 /** The path to read for `path`: itself, or the small file standing in for it. */
 export function standIn(path: string): string {
   return STAND_INS[path.toLowerCase()] ?? path;
@@ -31,12 +50,13 @@ export function withoutHitEffects<T extends object>(values: T): T {
 
 /**
  * The paths worth fetching ahead out of those a render recorded: lists drawn
- * before these cuts still name the backdrop and the hit effects.
+ * before these cuts still name the backdrop, the hit effects and the grain.
  */
 export function worthPreloading(paths: string[]): string[] {
   const wanted = new Set<string>();
   for (const path of paths) {
-    if (!HIT_EFFECT_FILES.test(path.toLowerCase())) wanted.add(standIn(path));
+    const name = path.toLowerCase();
+    if (!HIT_EFFECT_FILES.test(name) && !NEVER_READ.has(name)) wanted.add(standIn(path));
   }
   return [...wanted];
 }

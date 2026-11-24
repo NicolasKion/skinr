@@ -39,6 +39,18 @@ export interface Engine {
 
 let engine: Promise<Engine> | null = null;
 
+/** The DNA the first ship is expected to have (`expectShip`). */
+let expected: string | null = null;
+
+/**
+ * Names the ship the page will ask for first, so its values are built as
+ * soon as the factory is open, while the GPU and the scene still come up.
+ * Only for a DNA the factory can build as it is (no pattern to register).
+ */
+export function expectShip(dna: string) {
+  expected = dna;
+}
+
 /** Where dev builds put the engine for poking at from the console or a test script. */
 const DEBUG_HANDLE = '__shipEngine';
 
@@ -71,24 +83,45 @@ async function start(): Promise<Engine> {
   report('index');
   // The engine's code (loaded only in the browser, and only once a viewport
   // asks for it) downloads while the build is looked up.
-  const [files, { startRuntime }, { ShipRenderer }] = await Promise.all([
+  const [files, { startRuntime }, { ShipRenderer }, { pumped }] = await Promise.all([
     openGameFiles(),
     import('./backend'),
     import('./renderer'),
+    import('./pump'),
   ]);
   let renderer: ShipRenderer | null = null;
   const runtime = await startRuntime(files, (path, error) => renderer?.onMissing?.(path, error));
 
   // The factory reads its catalog while the GPU and the scene come up.
   report('sof');
+  /** The expected ship's values, under way since the factory opened. */
+  let ahead: { dna: string; values: Promise<unknown> } | null = null;
   const [sof, created] = await Promise.all([
     openSof(files).then((opened) => {
       report('gpu');
+      if (expected) {
+        ahead = { dna: expected, values: pumped(opened.BuildValuesFromDNAAsync(expected)) };
+        // A failure is met again, and reported, by the build `show` then makes.
+        ahead.values.catch(() => {});
+      }
       return opened;
     }),
     ShipRenderer.create(runtime),
   ]);
   renderer = created;
+  /** A DNA's values: those built ahead for it, once, or a new build. */
+  const valuesOf = async (dna: string) => {
+    const early = ahead as { dna: string; values: Promise<unknown> } | null;
+    ahead = null;
+    if (early?.dna === dna) {
+      try {
+        return await early.values;
+      } catch {
+        // Built again below, so the error comes from the build that was asked for.
+      }
+    }
+    return sof.BuildValuesFromDNAAsync(dna);
+  };
 
   report('ready');
   let latest = 0;
@@ -107,7 +140,7 @@ async function start(): Promise<Engine> {
       // Asked for again while it is still on its way in: it is shown when
       // that arrival is, not yet (the ship before it may still be on stage).
       if (dna === target) return arrival;
-      const values = await sof.BuildValuesFromDNAAsync(dna);
+      const values = await valuesOf(dna);
       if (request !== latest) return false;
       target = dna;
       if (transition.kind === 'slide') {

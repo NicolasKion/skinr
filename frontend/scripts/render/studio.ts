@@ -138,7 +138,7 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   const { placement } = await import('../../src/lib/viewer/placement.ts');
   const { buildShip } = await import('../../src/lib/viewer/ship.ts');
   const { alignBlockTextures } = await import('../../src/lib/viewer/block-align.ts');
-  const { standIn } = await import('../../src/lib/viewer/unused.ts');
+  const { blank, standIn } = await import('../../src/lib/viewer/unused.ts');
   const { STUDIO_LOOK, applyLighting, placeSun, takeLighting } =
     await import('../../src/lib/viewer/lighting.ts');
   const { FIELD_OF_VIEW, THUMBNAIL_FRAMING, THUMBNAIL_POSE } =
@@ -181,7 +181,9 @@ export async function openStudio(options: StudioOptions): Promise<Studio> {
   /** Files read and resources looked up for the first time, ever growing. */
   let requests = 0;
   const read = async (path: string) => {
-    // Files the page never draws are read as their stand-ins here too.
+    // Files the page never draws are left out or read as their stand-ins here too.
+    const unread = blank(path);
+    if (unread) return unread;
     const url = resolve(standIn(path));
     try {
       if (!url) throw new Error(`Not in the file index: ${path}`);

@@ -21,11 +21,13 @@ import { CjsWebgpuDevice } from '@carbonenginejs/runtime/trinityal/webgpu';
 import { CjsWebgpuRenderContextAL, CjsWebgpuRenderTarget } from 'cjs-webgpu-internal';
 
 import { alignBlockTextures } from './block-align';
+import { translations } from './effect-workers';
+import { isEffectSource } from './effects';
 import { Hologram, gpuUsage } from './hologram';
 import { STUDIO_LOOK, applyLighting, takeLighting } from './lighting';
 import { pumped } from './pump';
 import type { GameFiles } from './resources';
-import { standIn } from './unused';
+import { blank, standIn } from './unused';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -34,12 +36,12 @@ const DEFAULT_SCENE = 'res:/dx9/scene/universe/c01_cube.red';
 
 /**
  * The client ships dx11 effects; the runtime translates each permutation to
- * WebGPU when it is first used.
+ * WebGPU when it is first used, unless that was done ahead (effects.ts).
  */
 const EFFECTS = {
   source: 'dx11',
   target: 'webgpu',
-  translator: CjsWebgpuFormat,
+  translator: translations.wrap(CjsWebgpuFormat),
   permutations: 'onDemand',
   shaderModel: 'high',
 };
@@ -87,17 +89,23 @@ export interface Backend {
 
 /**
  * The resource manager reads every res:/ path through the file index (a
- * file that is never drawn as its small stand-in, unused.ts). A read that
+ * file that is never drawn as its small stand-in or not at all, unused.ts). A read that
  * fails (not in the index, or the CDN refused it) is reported to `onMissing`
  * before the runtime gets the error.
  */
 function createSource(files: GameFiles, onMissing: (path: string, error: Error) => void) {
   return {
-    Read: (path: string) =>
-      files.read(standIn(path)).catch((error: Error) => {
-        onMissing(path, error);
+    async Read(path: string) {
+      try {
+        const bytes = blank(path) ?? (await files.read(standIn(path)));
+        // An effect is handed over once its translation is waiting for it.
+        if (isEffectSource(path)) await translations.prepare(path, bytes);
+        return bytes;
+      } catch (error) {
+        onMissing(path, error as Error);
         throw error;
-      }),
+      }
+    },
   };
 }
 

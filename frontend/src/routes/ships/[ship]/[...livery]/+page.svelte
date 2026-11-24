@@ -138,6 +138,13 @@
   $effect(() => () => nav.clear());
 </script>
 
+<svelte:head>
+  <!-- The ship's game files, on their way before any script runs (resources.ts, preloadShip). -->
+  {#each data.filesAhead as href (href)}
+    <link rel="preload" as="fetch" crossorigin="anonymous" fetchpriority="low" {href} />
+  {/each}
+</svelte:head>
+
 <Seo
   title={seo.title}
   description={seo.description}

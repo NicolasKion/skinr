@@ -32,7 +32,10 @@
     stage.status = 'starting';
     const giveUp = setTimeout(() => (stage.booted = true), BOOT_TIMEOUT);
     import('#lib/viewer/engine.js')
-      .then(({ getEngine }) => getEngine((reached) => (stage.engineStage = reached)))
+      .then(({ expectShip, getEngine }) => {
+        if (stage.dna && !stage.pattern) expectShip(stage.dna);
+        return getEngine((reached) => (stage.engineStage = reached));
+      })
       .then((ready) => {
         if (!alive) return;
         // A page without a ship has nothing more to wait for.
@@ -61,7 +64,7 @@
   // is up (resources.ts).
   $effect(() => {
     const id = stage.ship?.id;
-    if (id !== undefined) void preloadShip(id);
+    if (id !== undefined) void preloadShip(id, stage.dna);
   });
 
   /**
