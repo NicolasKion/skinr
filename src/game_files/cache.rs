@@ -5,23 +5,34 @@
 //! is the one the render worker's studio (`frontend/scripts/render/studio.ts`)
 //! writes, so the two share a cache. A file that zstd does not shrink by enough gets an empty marker
 //! instead, so it is not compressed again on every request.
+//!
+//! The copy made on a file's first request is a quick one; each is then
+//! packed again at a slow level in the background, one file at a time.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
 
 use crate::cdn::{CdnClient, FetchError, Host};
 
-/// zstd's level for the stored copies: fast enough to compress on the first
-/// request (a few hundred MB/s), and most of the ratio of the slow levels.
-const ZSTD_LEVEL: i32 = 3;
+/// zstd's level for the copy made on a file's first request: fast enough to
+/// wait for (a few hundred MB/s), and most of the ratio of the slow levels.
+const QUICK_LEVEL: i32 = 3;
+/// The level each copy is packed again at in the background: a tenth smaller
+/// over a ship's files, at a few MB/s. The highest level whose window (8 MB)
+/// browsers still take in `Content-Encoding: zstd`.
+const SMALL_LEVEL: i32 = 19;
 /// A zstd copy is kept only below this share of the original, in percent:
 /// textures and audio that are compressed already barely shrink.
 const WORTH_PERCENT: usize = 95;
 /// Beside a file, its zstd copy and the marker for "not worth compressing".
 const ZSTD_SUFFIX: &str = ".zst";
 const PLAIN_SUFFIX: &str = ".plain";
+/// The marker for "the zstd copy is the small one".
+const SMALL_SUFFIX: &str = ".small";
 
 /// Distinguishes the temporary files of concurrent writes.
 static WRITES: AtomicU64 = AtomicU64::new(0);
@@ -45,11 +56,61 @@ pub struct Served {
 #[derive(Clone, Debug)]
 pub struct FileCache {
     root: PathBuf,
+    repacking: Arc<Repacking>,
+}
+
+/// The background packing of quick copies into small ones.
+#[derive(Debug)]
+struct Repacking {
+    /// One file at a time: a slow level keeps a core busy for seconds.
+    turn: tokio::sync::Semaphore,
+    /// Files looked at since the start, so each is checked once.
+    seen: Mutex<HashSet<PathBuf>>,
 }
 
 impl FileCache {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            repacking: Arc::new(Repacking {
+                turn: tokio::sync::Semaphore::new(1),
+                seen: Mutex::new(HashSet::new()),
+            }),
+        }
+    }
+
+    /// Packs the zstd copy of `raw` again at [`SMALL_LEVEL`] in the
+    /// background, unless that was done or is under way. Readers get the
+    /// quick copy until the small one has replaced it.
+    fn repack(&self, raw: &Path) {
+        let fresh = self
+            .repacking
+            .seen
+            .lock()
+            .expect("lock poisoned")
+            .insert(raw.to_owned());
+        if !fresh {
+            return;
+        }
+        let raw = raw.to_owned();
+        let repacking = self.repacking.clone();
+        tokio::spawn(async move {
+            let small = with_suffix(&raw, SMALL_SUFFIX);
+            if tokio::fs::try_exists(&small).await.unwrap_or(false) {
+                return;
+            }
+            let Ok(_turn) = repacking.turn.acquire().await else {
+                return;
+            };
+            let Ok(bytes) = tokio::fs::read(&raw).await else {
+                return;
+            };
+            if let Some(packed) = compress(bytes.into(), SMALL_LEVEL).await
+                && write(&with_suffix(&raw, ZSTD_SUFFIX), &packed).await
+            {
+                write(&small, &[]).await;
+            }
+        });
     }
 
     /// A resources CDN file, from disk or fetched (and stored) once; the zstd
@@ -76,6 +137,7 @@ impl FileCache {
 
         let zstd = accepts == Encoding::Zstd;
         if zstd && let Ok(bytes) = tokio::fs::read(&packed).await {
+            self.repack(&raw);
             return Ok(Served {
                 bytes: bytes.into(),
                 encoding: Encoding::Zstd,
@@ -95,9 +157,11 @@ impl FileCache {
                 encoding: Encoding::Identity,
             });
         }
-        match compress(bytes.clone()).await {
+        match compress(bytes.clone(), QUICK_LEVEL).await {
             Some(compressed) => {
-                write(&packed, &compressed).await;
+                if write(&packed, &compressed).await {
+                    self.repack(&raw);
+                }
                 Ok(Served {
                     bytes: compressed,
                     encoding: Encoding::Zstd,
@@ -114,10 +178,10 @@ impl FileCache {
     }
 }
 
-/// The zstd copy of `bytes`, or `None` when it would not save enough.
-async fn compress(bytes: Bytes) -> Option<Bytes> {
+/// The zstd copy of `bytes` at `level`, or `None` when it would not save enough.
+async fn compress(bytes: Bytes, level: i32) -> Option<Bytes> {
     let compressed = tokio::task::spawn_blocking(move || {
-        zstd::bulk::compress(&bytes, ZSTD_LEVEL)
+        zstd::bulk::compress(&bytes, level)
             .ok()
             .filter(|compressed| compressed.len() * 100 < bytes.len() * WORTH_PERCENT)
     })
@@ -134,8 +198,9 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 }
 
 /// Writes a file aside and moves it into place, so a reader never sees half
-/// of one. A failure only costs the cache, so it is logged and skipped.
-async fn write(path: &Path, bytes: &[u8]) {
+/// of one. A failure only costs the cache, so it is logged and skipped;
+/// whether the file is there now.
+async fn write(path: &Path, bytes: &[u8]) -> bool {
     let part = with_suffix(
         path,
         &format!(
@@ -152,8 +217,9 @@ async fn write(path: &Path, bytes: &[u8]) {
         tokio::fs::rename(&part, path).await
     }
     .await;
-    if let Err(error) = result {
+    if let Err(error) = &result {
         tracing::warn!(%error, path = %path.display(), "game files: could not cache");
         let _ = tokio::fs::remove_file(&part).await;
     }
+    result.is_ok()
 }

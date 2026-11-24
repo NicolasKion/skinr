@@ -148,6 +148,42 @@ async fn a_client_that_takes_zstd_gets_it() {
     assert_eq!(zstd::decode_all(body.as_slice()).unwrap(), TEXT.as_bytes());
 }
 
+/// Every file under `dir`, by its file name.
+fn file_names(dir: &std::path::Path) -> Vec<String> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.path().is_dir() {
+            names.extend(file_names(&entry.path()));
+        } else {
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    names
+}
+
+#[tokio::test]
+async fn the_zstd_copy_is_packed_small_in_the_background() {
+    let (app, _) = app("small").await;
+    let path = format!("/cdn/res/{BUILD}/dx9/model/ship/hull.gr2");
+    get_path(&app, &path, Some("zstd")).await;
+
+    let cache = std::env::temp_dir().join(format!("skinr-game-files-small-{}", std::process::id()));
+    let mut packed = false;
+    for _ in 0..200 {
+        packed = file_names(&cache).contains(&"aa_text.small".to_owned());
+        if packed {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(packed, "no small copy was made");
+
+    let (status, headers, body) = get_path(&app, &path, Some("zstd")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_ENCODING], "zstd");
+    assert_eq!(zstd::decode_all(body.as_slice()).unwrap(), TEXT.as_bytes());
+}
+
 #[tokio::test]
 async fn a_file_is_fetched_from_upstream_once() {
     let (app, fetches) = app("once").await;
